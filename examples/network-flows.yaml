@@ -1,0 +1,23 @@
+version: 1
+
+defaults:
+  timeout: 5s
+  retries: 1
+
+flows:
+  - id: database-outbound
+    group: FW-GROUP-001
+    direction: outbound
+    vantage: aks-app
+    protocol: tcp
+    host: db.internal.example
+    port: 5432
+
+  - id: api-inbound
+    group: FW-GROUP-002
+    direction: inbound
+    vantage: external-vm
+    protocol: https
+    url: https://api.example.com/health
+    expect:
+      status: [200]

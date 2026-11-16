@@ -1,0 +1,223 @@
+<div align="center">
+
+# netflow
+
+**Kubernetes Pod와 VM에서 실행하는 네트워크 연결 검증 CLI**
+
+[![CI](https://github.com/uknowpro/netflow/actions/workflows/ci.yml/badge.svg)](https://github.com/uknowpro/netflow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+
+[English](../README.md) · 한국어
+
+</div>
+
+netflow는 환경 이전과 방화벽 변경 후 실제 연결 가능 여부를 확인하는 CLI입니다. VM과 Kubernetes Job에서 같은 실행 파일과 설정 형식을 사용하고, 실행 위치에 맞는 통신 항목을 선택하여 단계별 결과를 터미널 또는 JSON으로 확인합니다.
+
+> 현재 초기 구현 단계입니다. 실제 연결을 검사하며 방화벽 규칙을 분석하거나 실패 원인을 방화벽으로 확정하지 않습니다. Cisco NetFlow/IPFIX 수집기와는 별개 프로젝트입니다. 한국어 지원은 이 문서로 제공하며 CLI 명령·도움말·결과 코드는 영어입니다.
+
+## 주요 기능
+
+- **Pod·VM 공통 CLI:** 별도 중앙 컨트롤러 없이 각 출발지에서 실행합니다.
+- **양방향 통신 검증:** 검증 대상 시스템 기준으로 Inbound와 Outbound를 구분합니다.
+- **단계별 결과:** DNS, TCP, TLS, HTTP 검증 결과를 구분합니다.
+- **자동화 연동:** 엄격한 YAML 설정 검증, 제한된 동시 실행·재시도, JSON 보고서와 종료 코드를 제공합니다.
+- **간단한 배포:** Go 실행 파일과 컨테이너로 실행하며 클러스터 API 접근이나 네트워크 특권이 필요하지 않습니다.
+
+## Inbound와 Outbound
+
+```text
+Inbound:  외부 VM/Pod [netflow] → 신규 AKS Service / Ingress
+Outbound: 신규 AKS Pod [netflow] → 외부 DB / API / VM
+```
+
+두 방향은 같은 검증 엔진을 사용합니다. **실제 실행 위치가 검증 경로를 결정합니다.** AKS 내부에서 설정에 `inbound`라고 적는 것만으로 외부 Inbound 경로를 재현할 수 없습니다. 허용된 실제 출발지에서 AKS의 실제 진입점으로 접속해야 합니다.
+
+`vantage`는 운영자가 지정하는 실행 위치 이름입니다. 출발지 IP를 변경하거나 위치를 인증하는 기능이 아닙니다. NAT가 있으면 방화벽에 보이는 출발지 주소가 달라질 수 있으며, 보고서의 로컬 소켓 주소는 NAT 이전 주소입니다.
+
+## 빠른 시작
+
+빌드에는 Go 1.26 이상이 필요합니다. 아래는 Linux 셸 기준이며 VM 실행에 Kubernetes는 필요하지 않습니다.
+
+```bash
+git clone https://github.com/uknowpro/netflow.git
+cd netflow
+go build -trimpath -o bin/netflow ./cmd/netflow
+
+./bin/netflow --help
+./bin/netflow probe --host 127.0.0.1 --protocol dns
+./bin/netflow probe --host db.internal.example --port 5432 --protocol tcp
+./bin/netflow probe --protocol https --url https://api.example.com/health
+```
+
+예제 주소는 실제 환경에 맞게 바꾸세요. 초기 구현에는 미리 빌드된 실행 파일과 공개 컨테이너 이미지 배포가 포함되지 않습니다.
+
+## 설정과 실행
+
+[예제 설정](../examples/network-flows.yaml)을 복사하여 목적지를 수정합니다.
+
+```yaml
+version: 1
+
+defaults:
+  timeout: 5s
+  retries: 1
+
+flows:
+  - id: database-outbound
+    group: FW-GROUP-001
+    direction: outbound
+    vantage: aks-app
+    protocol: tcp
+    host: db.internal.example
+    port: 5432
+
+  - id: api-inbound
+    group: FW-GROUP-002
+    direction: inbound
+    vantage: external-vm
+    protocol: https
+    url: https://api.example.com/health
+    expect:
+      status: [200]
+```
+
+각 출발지에서 해당 명령을 실행합니다.
+
+```bash
+# AKS 애플리케이션 네트워크의 Pod
+netflow test --config network-flows.yaml --vantage aks-app --group FW-GROUP-001
+
+# AKS 접근이 허용된 외부 VM
+netflow test --config network-flows.yaml --vantage external-vm --group FW-GROUP-002
+
+# JSON 보고서 저장
+netflow test --config network-flows.yaml --vantage aks-app \
+  --group FW-GROUP-001 --output json > result.json
+```
+
+그룹 필터를 먼저 적용합니다. 다른 그룹은 결과에서 제외됩니다. 선택한 항목 중 실행 위치가 다르면 트래픽을 보내지 않고 `SKIPPED`로 기록합니다. 설정에 `vantage`가 없는 항목은 어느 위치에서든 실행됩니다. `--group`을 생략하면 실행 위치가 달라 건너뛸 항목을 포함하여 모든 항목이 검토됩니다.
+
+### 설정 항목
+
+| 항목 | 설명 |
+| --- | --- |
+| `version` | 필수, 현재 `1` |
+| `defaults.timeout` | 한 번의 시도에서 모든 단계에 적용되는 전체 제한 시간. 기본 `5s`, 최대 `5m` |
+| `defaults.retries` | 실패 후 추가 시도 횟수. 기본 `0`, 범위 `0–5`, 시도 사이 200ms 대기 |
+| `flows[].id` | 필수, 중복 불가 식별자 |
+| `group` | 선택, 방화벽 요청 또는 업무 단위 그룹 |
+| `direction` | 선택, `inbound` 또는 `outbound`. 경로를 변경하지 않는 메타데이터 |
+| `vantage` | 선택, `--vantage`와 일치해야 실행되는 위치 이름 |
+| `protocol` | 필수, `dns`, `tcp`, `tls`, `http`, `https` |
+| `host`, `port` | DNS는 `host`만 사용. TCP/TLS는 둘 다 필수 |
+| `url` | HTTP/HTTPS에서 `host`·`port` 대신 사용하는 전체 URL |
+| `expect.status` | HTTP/HTTPS에서 허용할 상태 코드 목록. 생략하면 `200–299` |
+
+알 수 없는 키, 중복 ID, 잘못된 값, 여러 YAML 문서, 1MiB를 초과하는 설정 파일은 거부합니다. 프로토콜 이름은 소문자입니다. `test`의 동시 실행 수는 기본 4이며 `--concurrency 1..64`로 조정합니다. `probe`는 `--timeout`, `--retries`를 지원하고 `test`는 YAML 설정을 사용합니다.
+
+## 결과 해석
+
+```text
+FLOW                     STATUS    DETAIL                   TIME
+database-outbound        PASS                               12ms
+api-inbound              SKIPPED   VANTAGE_MISMATCH         0ms
+
+PASS=1 FAIL=0 UNKNOWN=0 SKIPPED=1
+```
+
+| 상태 | 의미 |
+| --- | --- |
+| `PASS` | 설정한 모든 검증 조건 충족 |
+| `FAIL` | 실행한 검증 단계에서 실패 |
+| `SKIPPED` | 실행 위치 불일치로 미검증 |
+| `UNKNOWN` | 향후 판정 불가능한 검증을 위한 예약 상태. 현재 프로토콜에서는 발생하지 않음 |
+
+HTTP `403`은 DNS·TCP·TLS가 통과하고 HTTP 기대 조건만 실패한 결과일 수 있습니다. 시간 초과만으로 방화벽 차단을 확정할 수 없습니다. 라우팅, 서비스 상태, 정책 및 관련 인프라 로그를 함께 확인해야 합니다.
+
+오류 코드는 `DNS_ERROR`, `CONNECTION_REFUSED`, `CONNECT_TIMEOUT`, `CONNECT_ERROR`, `TLS_ERROR`, `HTTP_ERROR`, `HTTP_STATUS_MISMATCH`, `TIMEOUT`, `CANCELED`, `VANTAGE_MISMATCH` 등입니다.
+
+JSON에는 스키마 버전, 실행 ID, UTC 시작 시간, CLI 버전, 실행 위치, 요약과 입력 순서의 개별 결과가 포함됩니다. 각 결과는 단계별 상태·시간, 해석된 IP, 연결 시 로컬·원격 소켓 주소, 시도 횟수, 수신한 HTTP 상태를 기록합니다. 재시도 시 단계별 증거는 **마지막 시도**의 결과이며 전체 시간은 앞선 시도와 대기를 포함합니다. 서버 오류 원문이나 응답 본문은 기록하지 않습니다.
+
+| 종료 코드 | 의미 |
+| --- | --- |
+| `0` | 선택한 항목 모두 통과 또는 도움말·버전 표시 성공 |
+| `1` | 실패·건너뜀·판정 불가 항목 존재 또는 실행 취소 |
+| `2` | 잘못된 명령·설정, 선택한 그룹에 항목 없음, JSON 출력 실패 |
+
+미검증 경로가 성공으로 처리되지 않도록 `SKIPPED`도 자동화 실패로 처리합니다. 여러 위치를 포함한 설정은 각 실행 위치에 맞는 그룹을 선택하세요.
+
+## Kubernetes Job 실행
+
+클러스터에서 접근할 수 있는 레지스트리에 이미지를 빌드하고 올립니다.
+
+```bash
+docker build -t YOUR_REGISTRY/netflow:dev .
+docker push YOUR_REGISTRY/netflow:dev
+```
+
+[Kubernetes Job 예제](../examples/kubernetes-job.yaml)의 이미지와 Pod 라벨을 수정하고 애플리케이션 네임스페이스와 실제 목적지가 들어간 설정을 사용합니다.
+
+```bash
+kubectl -n YOUR_NAMESPACE create configmap netflow-config \
+  --from-file=network-flows.yaml=./network-flows.yaml
+kubectl -n YOUR_NAMESPACE apply -f examples/kubernetes-job.yaml
+kubectl -n YOUR_NAMESPACE logs -f job/netflow-outbound
+kubectl -n YOUR_NAMESPACE get job netflow-outbound
+```
+
+예제는 Outbound 한 그룹을 실행하며 비루트 사용자, 읽기 전용 루트 파일시스템, ServiceAccount 토큰 자동 마운트 해제를 적용합니다. Job 자체의 실패 재시도는 없고 CLI 설정의 재시도는 적용됩니다. 다시 실행하려면 Job 이름을 바꾸거나 완료된 Job을 삭제한 뒤 생성하세요. 완료된 Job에 설정을 적용하는 것만으로 재실행되지는 않습니다. `kubectl logs`의 종료 코드는 컨테이너의 종료 코드를 전달하지 않습니다.
+
+검증하려는 애플리케이션과 네임스페이스, 관련 라벨, DNS 설정, 필요한 ServiceAccount 신원, 노드 배치, 서비스 메시 동작을 맞추세요. 다른 설정의 Pod는 다른 결과를 낼 수 있습니다. Inbound는 대상 클러스터 외부의 실제 출발지에서 실제 Service/Ingress 진입점으로 테스트합니다.
+
+## VM·컨테이너 실행
+
+VM에 빌드된 실행 파일과 설정을 복사한 뒤 실행합니다.
+
+```bash
+./netflow test --config network-flows.yaml \
+  --vantage external-vm --group FW-GROUP-002
+```
+
+컨테이너에서는 설정을 마운트합니다.
+
+```bash
+docker run --rm \
+  -v "$PWD/network-flows.yaml:/config/flows.yaml:ro" \
+  YOUR_REGISTRY/netflow:dev test --config /config/flows.yaml \
+  --vantage external-vm --group FW-GROUP-002 --output json
+```
+
+컨테이너 네트워크는 VM 자체의 네트워크 경로와 다를 수 있습니다. VM의 경로를 검증하려면 실행 파일을 직접 실행하는 방식이 적합합니다. TLS는 시스템 신뢰 저장소와 TLS 1.2 이상을 사용합니다. 사설 인증서가 필요하면 실행 환경의 신뢰 저장소에 조직의 CA를 설치하세요. CLI에서 인증서 검증을 비활성화하는 옵션은 제공하지 않습니다.
+
+## 현재 범위와 제한
+
+- HTTP는 GET으로 직접 접속합니다. 프록시 환경변수를 사용하지 않고 리다이렉트를 따라가지 않습니다. 응답 헤더·상태를 검사하며 본문을 읽거나 검증하지 않습니다.
+- DNS는 실행 환경의 리졸버를 사용합니다. TCP는 반환된 주소에 순서대로 연결하며 한 시도의 제한 시간을 공유합니다. 성공은 주소 하나에 대한 연결을 의미하며 모든 IP나 백엔드 인스턴스의 성공을 보장하지 않습니다.
+- UDP, 수신 서버, 출발지 IP 위조, 방화벽 규칙 분석, 중앙 에이전트·컨트롤러, 결과 집계 서비스는 포함되지 않습니다.
+- 커스텀 헤더, 인증, 환경변수 치환, mTLS, HTTP 메서드 선택, 항목별 시간 제한은 아직 지원하지 않습니다.
+- URL은 JSON에 포함됩니다. 쿼리 문자열에 토큰을 넣지 마세요. URL 사용자 정보 형식의 인증 정보는 거부합니다.
+- 보고서에는 내부 주소가 포함될 수 있습니다. `results/`, 로컬 설정 파일, `.env` 파일은 Git에서 제외합니다.
+
+## 개발과 검증
+
+```bash
+gofmt -w cmd internal
+go vet ./...
+go test -race ./...
+go build -o bin/netflow ./cmd/netflow
+```
+
+테스트는 로컬 서버로 연결 성공·거부, 신뢰되지 않은 TLS 인증서 거부, HTTP 상태 검증, 리다이렉트 미추적, 시간 초과, 설정 검증, 위치 필터링, 재시도 횟수, JSON과 종료 코드를 확인합니다. 실제 AKS·VM의 방화벽 경로는 해당 환경에서 별도로 검증해야 합니다.
+
+CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 및 컨테이너 빌드를 수행합니다. 버전 문자열은 `go build -ldflags="-X main.version=v0.1.0" -o bin/netflow ./cmd/netflow`로 지정할 수 있습니다.
+
+## 향후 확장
+
+- 프로토콜별 응답을 확인하는 UDP 검증과 판정 불가 결과
+- 보고서에 비밀값을 노출하지 않는 인증·사설 PKI 설정
+- 여러 출발지의 결과 집계와 선택적 원격 에이전트
+- 실행 파일·컨테이너 자동 릴리스
+
+## 라이선스
+
+[MIT](../LICENSE)

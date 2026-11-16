@@ -1,0 +1,19 @@
+# Build and test output
+/bin/
+/netflow
+/dist/
+*.test
+*.out
+coverage.*
+# Local reports and configuration (may contain internal endpoints)
+/results/
+network-flows.local.yaml
+.env
+.env.*
+!.env.example
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
