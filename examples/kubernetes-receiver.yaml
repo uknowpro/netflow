@@ -1,0 +1,65 @@
+# Temporary receiver; Service is cluster-internal by default.
+# Publish through the actual intended entry path to test external inbound traffic.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netflow-receiver
+  labels:
+    app: netflow-receiver
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: netflow
+      image: ghcr.io/uknowpro/netflow:v0.2.0
+      args: [serve, --listen, '0.0.0.0:8080', --duration, 10m, --output, json]
+      ports:
+        - name: probe
+          containerPort: 8080
+      env:
+        - name: NETFLOW_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NETFLOW_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NETFLOW_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: NETFLOW_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 32Mi
+        limits:
+          cpu: 500m
+          memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: netflow-receiver
+spec:
+  selector:
+    app: netflow-receiver
+  ports:
+    - name: probe
+      port: 8080
+      targetPort: probe

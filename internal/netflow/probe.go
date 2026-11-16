@@ -19,9 +19,12 @@ type Stage struct {
 	Status     string `json:"status"`
 	Code       string `json:"code,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
+	DurationUS int64  `json:"duration_us"`
 }
 type Result struct {
 	Flow          Flow       `json:"flow"`
+	Sequence      int        `json:"sequence,omitempty"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
 	Status        string     `json:"status"`
 	Code          string     `json:"code,omitempty"`
 	Attempts      int        `json:"attempts"`
@@ -46,7 +49,8 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	add := func(name string, start time.Time, err error, code string) bool {
-		s := Stage{Name: name, Status: "PASS", DurationMS: time.Since(start).Milliseconds()}
+		elapsed := time.Since(start)
+		s := Stage{Name: name, Status: "PASS", DurationMS: elapsed.Milliseconds(), DurationUS: elapsed.Microseconds()}
 		if err != nil {
 			s.Status = "FAIL"
 			s.Code = code

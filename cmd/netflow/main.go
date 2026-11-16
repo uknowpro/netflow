@@ -24,8 +24,11 @@ func main() {
 func run(ctx context.Context, args []string, out, errs io.Writer) int {
 	fail := func(err error) int { fmt.Fprintln(errs, "netflow:", err); return 2 }
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(out, "netflow — network reachability from Pods and VMs\n\nUsage: netflow <test|probe|version> [flags]\nUse netflow test --help or netflow probe --help for options.")
+		fmt.Fprintln(out, "netflow — network reachability from Pods and VMs\n\nUsage: netflow <test|probe|serve|version> [flags]\nUse netflow <command> --help for options.")
 		return 0
+	}
+	if args[0] == "serve" {
+		return runServe(ctx, args[1:], out, errs)
 	}
 	if args[0] == "version" {
 		fmt.Fprintln(out, "netflow", version)
@@ -42,6 +45,8 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 	var port *int
 	var timeout *time.Duration
 	var retries, concurrency *int
+	var count *int
+	var interval *time.Duration
 	if args[0] == "test" {
 		config = fs.String("config", "", "Path to network flows YAML (required)")
 		group = fs.String("group", "", "Only run this firewall request group")
@@ -53,6 +58,8 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 		rawURL = fs.String("url", "", "Full URL for http/https")
 		timeout = fs.Duration("timeout", 5*time.Second, "Timeout per attempt (up to 5m)")
 		retries = fs.Int("retries", 0, "Additional attempts (0–5)")
+		count = fs.Int("count", 1, "Independent samples (1–10000); count > 1 requires retries=0")
+		interval = fs.Duration("interval", time.Second, "Pause between samples (0–1h)")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -95,6 +102,9 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 			return fail(fmt.Errorf("no flows match the selected group"))
 		}
 	} else {
+		if *count < 1 || *count > 10000 || *interval < 0 || *interval > time.Hour || (*count > 1 && *retries != 0) {
+			return fail(fmt.Errorf("count must be 1–10000, interval 0–1h; repeated probes require retries=0"))
+		}
 		c = nf.Config{Version: 1, Defaults: nf.Defaults{Timeout: timeout.String(), Retries: *retries}, Flows: []nf.Flow{{ID: "probe", Protocol: *protocol, Host: *host, Port: *port, URL: *rawURL, Vantage: *vantage}}}
 		t, err = c.Validate()
 		if err != nil {
@@ -103,7 +113,21 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 	}
 	source := nf.CollectSource(*vantage)
 	started := time.Now().UTC()
-	results := nf.Run(ctx, c.Flows, *vantage, t, c.Defaults.Retries, workers)
+	var results []nf.Result
+	var repeat *nf.RepeatStats
+	if count != nil && *count > 1 {
+		var emit func(nf.Result)
+		if *output == "table" {
+			emit = func(r nf.Result) {
+				fmt.Fprintf(out, "Sample %d/%d  %s  %s  %dms\n", r.Sequence, *count, r.Status, r.Code, r.DurationMS)
+			}
+		}
+		samples, stats := nf.Repeat(ctx, c.Flows[0], t, *count, *interval, emit)
+		results = samples
+		repeat = &stats
+	} else {
+		results = nf.Run(ctx, c.Flows, *vantage, t, c.Defaults.Retries, workers)
+	}
 	summary := map[string]int{"PASS": 0, "FAIL": 0, "UNKNOWN": 0, "SKIPPED": 0}
 	code := 0
 	for _, r := range results {
@@ -117,15 +141,16 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 	}
 	if *output == "json" {
 		report := struct {
-			SchemaVersion int            `json:"schema_version"`
-			RunID         string         `json:"run_id"`
-			StartedAt     time.Time      `json:"started_at"`
-			Vantage       string         `json:"vantage"`
-			Version       string         `json:"version"`
-			Source        nf.Source      `json:"source"`
-			Summary       map[string]int `json:"summary"`
-			Results       []nf.Result    `json:"results"`
-		}{1, started.Format("20060102T150405.000000000Z"), started, *vantage, version, source, summary, results}
+			SchemaVersion int             `json:"schema_version"`
+			RunID         string          `json:"run_id"`
+			StartedAt     time.Time       `json:"started_at"`
+			Vantage       string          `json:"vantage"`
+			Version       string          `json:"version"`
+			Source        nf.Source       `json:"source"`
+			Summary       map[string]int  `json:"summary"`
+			Results       []nf.Result     `json:"results"`
+			Repeat        *nf.RepeatStats `json:"repeat,omitempty"`
+		}{1, started.Format("20060102T150405.000000000Z"), started, *vantage, version, source, summary, results, repeat}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
@@ -138,6 +163,9 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 		}
 		fmt.Fprintln(out, "Source IP observed by target: UNKNOWN (NAT may change the local address)")
 		for _, r := range results {
+			if repeat != nil && r.Sequence != repeat.Completed {
+				continue
+			}
 			target := r.Flow.URL
 			if target == "" {
 				target = r.Flow.Host
@@ -155,6 +183,16 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 				fmt.Fprintf(out, "  %-14s %-12s %-24s %dms\n", stage.Name, stage.Status, stage.Code, stage.DurationMS)
 			}
 			fmt.Fprintf(out, "  authentication NOT_TESTED\n  %s\n", r.Assessment.Summary)
+		}
+		if repeat != nil {
+			rate := "N/A"
+			if repeat.SuccessRate != nil {
+				rate = fmt.Sprintf("%.1f%%", *repeat.SuccessRate)
+			}
+			fmt.Fprintf(out, "\nSamples: %d/%d  Success: %s  Not run: %d  Interrupted: %t\n", repeat.Completed, repeat.Requested, rate, repeat.NotRun, repeat.Interrupted)
+			if l := repeat.TCPConnect; l != nil {
+				fmt.Fprintf(out, "TCP connect latency (%d successful connections): min=%.3fms avg=%.3fms max=%.3fms\n", l.Samples, l.MinMS, l.AvgMS, l.MaxMS)
+			}
 		}
 		fmt.Fprintf(out, "\nPASS=%d FAIL=%d UNKNOWN=%d SKIPPED=%d\n", summary["PASS"], summary["FAIL"], summary["UNKNOWN"], summary["SKIPPED"])
 	}

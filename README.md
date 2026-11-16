@@ -131,6 +131,56 @@ Group selection happens before execution. Flows in other groups are omitted. Wit
 
 Unknown keys, duplicate flow IDs, invalid settings, multiple YAML documents, and configurations over 1 MiB are rejected. Protocol names are lowercase. Concurrency defaults to 4 and can be set with `--concurrency 1..64` on `test`. Probe supports `--timeout` and `--retries`; test reads them from YAML.
 
+## Repeated connection checks
+
+```bash
+netflow probe --host db.internal.example --port 5432 --protocol tcp \
+  --count 20 --interval 1s
+
+netflow probe --host db.internal.example --port 5432 --protocol tcp \
+  --count 20 --interval 1s --output json > results/repeated.json
+```
+
+Create `results/` before redirecting into it. `--count` is 1–10000 (default 1); `--interval` is a pause **after** each completed sample, from 0 to 1h (default 1s). Repeated probes work with all existing probe protocols and require `--retries 0` so a retry cannot hide an intermittent failure. `--timeout` applies separately to every sample. `test` and YAML configuration do not accept count/interval yet.
+
+Terminal output streams each sample, followed by the last sample's detail and aggregate statistics. JSON is a single report emitted at completion, containing every sample with its sequence number and UTC start time, plus a `repeat` summary: requested/completed/passed/failed/not-run counts, interruption flag, success percentage, and TCP connect min/average/max milliseconds. Stage `duration_us` supplies sub-millisecond precision alongside the existing `duration_ms` field.
+
+Success rate is passed **configured checks** divided by completed samples; it is not packet loss. TCP timing covers the TCP stage (including attempts across resolved addresses), not ICMP RTT or application response time. Only successful TCP stages contribute to TCP timing, even when a later TLS/HTTP check fails. With no successful TCP connection, timing is omitted. On Ctrl+C, completed evidence is retained, the current canceled attempt can be recorded as failed, remaining samples are `not_run`, and the command exits 1. An empty run has a null success percentage. Any failed sample makes the overall exit code 1, even if the last sample passes.
+
+## Temporary inbound receiver
+
+Run a receiver on the intended destination VM/Pod, then probe it from the intended source:
+
+```bash
+# Destination: default bind is loopback; explicitly bind externally for remote tests.
+netflow serve --listen 0.0.0.0:8080 --duration 10m --output json
+
+# Source: use the receiver's reachable IP/DNS name.
+netflow probe --host RECEIVER_IP --port 8080 --protocol tcp --count 20 --interval 1s
+```
+
+`serve` accepts TCP connections, records the local address and actual socket peer IP/port, then immediately closes the connection. It does not read/echo application data, provide HTTP/TLS, or perform authentication. Use a spare test port; it cannot share a port already bound by an application. This proves the test endpoint's path only, not a different service or policy.
+
+The default bind is `127.0.0.1:8080`; IPv6 can use `[::]:8080`. Duration defaults to 10 minutes and must be greater than zero and at most 24 hours. `--max-connections N` stops after N accepted sockets (0, the default, means unlimited until the duration expires). Every accepted connection counts, including load balancer health checks or unrelated clients. Ctrl+C, the duration limit, and the connection limit stop normally with exit code 0; invalid arguments, bind/accept errors, or output errors return 2. Zero accepted connections is an idle receiver, not proof that a firewall blocked anything.
+
+`--output json` emits **JSON Lines**, one event per line: `listening`, `connection`, then `stopped`. The first event includes source metadata. Connection events include `peer_address` and `observed_source_ip`; these describe the peer seen **at this listener**, which can be a proxy/load balancer/NAT address. No forwarded headers are trusted. The client report still reports its destination-observed source as unknown; receiver logs are not automatically returned or merged.
+
+For containers:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/uknowpro/netflow:v0.2.0 \
+  serve --listen 0.0.0.0:8080 --duration 10m --output json
+```
+
+For Kubernetes, [examples/kubernetes-receiver.yaml](examples/kubernetes-receiver.yaml) provides a temporary non-root Pod and a **ClusterIP** Service. It is not an external ingress by itself. Adapt it to the real namespace, labels, NetworkPolicy and entry path being tested; it does not configure firewall rules or create a public load balancer.
+
+```bash
+kubectl -n YOUR_NAMESPACE apply -f examples/kubernetes-receiver.yaml
+kubectl -n YOUR_NAMESPACE logs -f pod/netflow-receiver
+# Remove the temporary Pod and Service when finished.
+kubectl -n YOUR_NAMESPACE delete -f examples/kubernetes-receiver.yaml
+```
+
 ## Source identity and verification scope
 
 Each JSON report includes a `source` object containing hostname, operating system, CPU architecture, the execution label, and addresses of active network interfaces. These interface addresses are an inventory, **not proof of the source address selected for a failed connection**. A successful connection records its actual `local_address` and `remote_address` separately per flow. IPv4 and IPv6 destinations are supported where the host network permits them.
@@ -222,20 +272,20 @@ Container networking may differ from the host's network path. Prefer the native 
 
 - HTTP uses GET, connects directly, ignores proxy environment variables, and does not follow redirects. It checks response headers/status; it does not read or validate response bodies.
 - DNS uses the runtime's configured resolver. TCP attempts resolved addresses until one connects, sharing the attempt deadline. A pass establishes reachability to **one** address, not all DNS answers or backend instances.
-- There is no UDP probe, listening server, source IP spoofing, firewall rule analysis, central agent/controller, or result aggregation service.
+- There is no UDP probe, source IP spoofing, firewall rule analysis, central agent/controller, or result aggregation service.
 - Custom headers, authentication, environment-variable interpolation, mTLS, custom HTTP methods, and per-flow timeout overrides are not implemented yet.
 - Use endpoints that do not require embedded secrets. Configured URLs are included in JSON reports; do not put tokens in URL query strings. URL user-info credentials are rejected.
 - Reports can contain internal addresses and endpoint URLs; keep them in an appropriate location. `results/`, local configuration files, and `.env` files are ignored by Git.
 
 ## Releases and installation
 
-Pushing a version tag such as `v0.1.2` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.1.2-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
+Pushing a version tag such as `v0.2.0` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.2.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
 
 After a version appears in [GitHub Releases](https://github.com/uknowpro/netflow/releases):
 
 ```bash
 # Replace the version with an existing release; use arm64 for ARM machines.
-VERSION=v0.1.2
+VERSION=v0.2.0
 ARCH=amd64
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
 curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
@@ -253,15 +303,15 @@ For Kubernetes, replace the example image with the published version (or its dig
 Maintainers can prepare artifacts locally without publishing:
 
 ```bash
-bash scripts/build-release.sh v0.1.2
-# Output: dist/v0.1.2/ (ignored by Git)
+bash scripts/build-release.sh v0.2.0
+# Output: dist/v0.2.0/ (ignored by Git)
 ```
 
 To publish a reviewed commit:
 
 ```bash
-git tag -a v0.1.2 -m "netflow v0.1.2"
-git push origin v0.1.2
+git tag -a v0.2.0 -m "netflow v0.2.0"
+git push origin v0.2.0
 ```
 
 The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. Release publication is gated on native Linux, Windows, and macOS tests on x64 and ARM64 GitHub runners. Linux 386/ARMv7 and FreeBSD binaries are cross-built only. Real AKS/VM firewall paths remain separate environment checks.
@@ -279,7 +329,7 @@ go build -o bin/netflow ./cmd/netflow
 
 Tests use local listeners and HTTP/TLS servers to verify connection success/refusal, TLS certificate rejection, HTTP status checks, redirect behavior, timeouts, configuration validation, execution-location filtering, retry counts, JSON output, and exit codes. Actual AKS/VM firewall paths require environment-specific validation.
 
-CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.1.2" -o bin/netflow ./cmd/netflow`.
+CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.2.0" -o bin/netflow ./cmd/netflow`.
 
 ## Roadmap
 

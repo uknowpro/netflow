@@ -27,4 +27,5 @@ jobs:
         run: |
           go build -o netflow-smoke.exe ./cmd/netflow
           ./netflow-smoke.exe version
-          ./netflow-smoke.exe probe --protocol dns --host localhost --output json
+          ./netflow-smoke.exe probe --protocol dns --host localhost --count 3 --interval 0s --output json
+          ./netflow-smoke.exe serve --listen 127.0.0.1:0 --duration 100ms --output json

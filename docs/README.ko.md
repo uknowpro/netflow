@@ -127,6 +127,56 @@ netflow test --config network-flows.yaml --vantage aks-app \
 
 알 수 없는 키, 중복 ID, 잘못된 값, 여러 YAML 문서, 1MiB를 초과하는 설정 파일은 거부합니다. 프로토콜 이름은 소문자입니다. `test`의 동시 실행 수는 기본 4이며 `--concurrency 1..64`로 조정합니다. `probe`는 `--timeout`, `--retries`를 지원하고 `test`는 YAML 설정을 사용합니다.
 
+## 반복 연결 검사
+
+```bash
+netflow probe --host db.internal.example --port 5432 --protocol tcp \
+  --count 20 --interval 1s
+
+netflow probe --host db.internal.example --port 5432 --protocol tcp \
+  --count 20 --interval 1s --output json > results/repeated.json
+```
+
+파일 저장 전 `results/` 디렉터리를 생성하세요. `--count`는 1–10000회(기본 1회), `--interval`은 각 시도가 **끝난 후** 다음 시도까지의 대기 시간으로 0–1시간(기본 1초)입니다. 기존 `probe` 프로토콜 모두에 적용하며, 간헐적 실패를 재시도로 가리지 않도록 반복 검사에서는 `--retries 0`만 허용합니다. `--timeout`은 매 시도마다 별도로 적용됩니다. `test`·YAML에는 아직 count/interval을 적용하지 않습니다.
+
+터미널은 시도별 결과를 바로 표시하고 마지막 시도의 상세 결과와 전체 통계를 출력합니다. JSON은 종료 시 하나의 보고서로 출력하며, 각 시도의 순번·UTC 시작 시각·결과와 `repeat` 요약을 포함합니다. 요약에는 요청·완료·성공·실패·미실행 횟수, 중단 여부, 성공률, TCP 연결 시간의 최소·평균·최댓값이 담깁니다. 단계별 `duration_us`를 추가하여 기존 `duration_ms`와 함께 1ms 미만 시간도 기록합니다.
+
+성공률은 완료한 시도 중 **설정한 조건을 통과한 비율**이며 패킷 손실률이 아닙니다. TCP 시간은 여러 해석된 IP에 대한 연결 시도를 포함한 TCP 단계 시간이며 ICMP RTT나 애플리케이션 응답 시간이 아닙니다. TCP 성공 단계만 시간 통계에 포함되며 이후 TLS·HTTP가 실패해도 해당 TCP 시간은 포함됩니다. TCP 성공이 없으면 시간 통계는 생략합니다. Ctrl+C 시 완료한 결과를 보존하고 현재 취소된 시도는 실패로 기록될 수 있으며 나머지는 `not_run`으로 남깁니다. 이 경우 종료 코드는 1입니다. 실행된 시도가 없으면 성공률은 null입니다. 마지막 시도가 성공했더라도 앞서 실패가 한 번이라도 있으면 전체 종료 코드는 1입니다.
+
+## 임시 Inbound 수신 서버
+
+검증 대상 VM·Pod에서 수신 서버를 실행하고 실제 출발지에서 접속합니다.
+
+```bash
+# 목적지: 외부 접속을 받으려면 명시적으로 외부 바인딩을 지정합니다.
+netflow serve --listen 0.0.0.0:8080 --duration 10m --output json
+
+# 출발지: 접근 가능한 목적지 IP 또는 도메인으로 변경합니다.
+netflow probe --host RECEIVER_IP --port 8080 --protocol tcp --count 20 --interval 1s
+```
+
+`serve`는 TCP 연결을 받아 로컬 주소와 **실제 소켓에서 보이는 상대 IP·포트**를 기록한 뒤 즉시 닫습니다. 애플리케이션 데이터를 읽거나 반환하지 않으며 HTTP·TLS·인증 기능을 제공하지 않습니다. 실제 앱이 점유한 포트를 공유할 수 없으므로 별도 테스트 포트를 사용하세요. 검증 결과는 이 테스트 엔드포인트의 경로에만 해당하며 다른 서비스나 정책의 성공을 보장하지 않습니다.
+
+기본 바인딩은 `127.0.0.1:8080`이며 IPv6는 `[::]:8080`을 지정할 수 있습니다. 실행 시간은 기본 10분, 0보다 크고 최대 24시간입니다. `--max-connections N`은 N개 연결을 수락한 뒤 종료하며 기본 0은 실행 시간 내 연결 수 제한 없음을 의미합니다. 로드밸런서 상태 검사나 다른 클라이언트 등 모든 수락된 연결이 횟수에 포함됩니다. Ctrl+C·시간 제한·횟수 제한에 따른 정상 종료는 코드 0, 잘못된 인자·바인딩·수신·출력 오류는 코드 2입니다. 연결이 0건이었다는 사실만으로 방화벽 차단을 판정하지 않습니다.
+
+`--output json`은 한 줄에 이벤트 하나를 기록하는 **JSON Lines**입니다. `listening` → `connection` → `stopped` 이벤트를 출력하며 첫 이벤트에 출발 환경 정보가 포함됩니다. 연결 이벤트의 `peer_address`, `observed_source_ip`는 **해당 수신 소켓이 본 상대 주소**로, 프록시·로드밸런서·NAT의 주소일 수 있습니다. 전달 헤더를 신뢰하지 않습니다. 클라이언트 보고서의 목적지 관측 주소는 여전히 미확인이며 수신 로그를 자동 반환하거나 병합하지 않습니다.
+
+컨테이너 실행:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/uknowpro/netflow:v0.2.0 \
+  serve --listen 0.0.0.0:8080 --duration 10m --output json
+```
+
+[Kubernetes 수신 예제](../examples/kubernetes-receiver.yaml)는 비루트 임시 Pod와 **ClusterIP** Service를 만듭니다. 그 자체로 외부 진입점은 아닙니다. 실제 검증할 네임스페이스·라벨·NetworkPolicy·진입 경로에 맞게 수정해야 하며 방화벽 규칙이나 공개 로드밸런서를 자동 생성하지 않습니다.
+
+```bash
+kubectl -n YOUR_NAMESPACE apply -f examples/kubernetes-receiver.yaml
+kubectl -n YOUR_NAMESPACE logs -f pod/netflow-receiver
+# 완료 후 임시 Pod와 Service 정리
+kubectl -n YOUR_NAMESPACE delete -f examples/kubernetes-receiver.yaml
+```
+
 ## 출발지 정보와 검증 범위
 
 JSON의 `source`에 호스트명, 운영체제, CPU 종류, 실행 위치 이름, 활성 네트워크 인터페이스 주소 목록을 기록합니다. 인터페이스 주소는 보유 주소 목록이며 **연결 실패 시 실제 사용한 출발지 주소의 증거는 아닙니다**. 연결 성공 시 해당 연결의 `local_address`와 `remote_address`를 별도로 기록합니다. 실행 환경 네트워크가 지원하면 IPv4·IPv6를 사용할 수 있습니다.
@@ -218,20 +268,20 @@ docker run --rm \
 
 - HTTP는 GET으로 직접 접속합니다. 프록시 환경변수를 사용하지 않고 리다이렉트를 따라가지 않습니다. 응답 헤더·상태를 검사하며 본문을 읽거나 검증하지 않습니다.
 - DNS는 실행 환경의 리졸버를 사용합니다. TCP는 반환된 주소에 순서대로 연결하며 한 시도의 제한 시간을 공유합니다. 성공은 주소 하나에 대한 연결을 의미하며 모든 IP나 백엔드 인스턴스의 성공을 보장하지 않습니다.
-- UDP, 수신 서버, 출발지 IP 위조, 방화벽 규칙 분석, 중앙 에이전트·컨트롤러, 결과 집계 서비스는 포함되지 않습니다.
+- UDP, 출발지 IP 위조, 방화벽 규칙 분석, 중앙 에이전트·컨트롤러, 결과 집계 서비스는 포함되지 않습니다.
 - 커스텀 헤더, 인증, 환경변수 치환, mTLS, HTTP 메서드 선택, 항목별 시간 제한은 아직 지원하지 않습니다.
 - URL은 JSON에 포함됩니다. 쿼리 문자열에 토큰을 넣지 마세요. URL 사용자 정보 형식의 인증 정보는 거부합니다.
 - 보고서에는 내부 주소가 포함될 수 있습니다. `results/`, 로컬 설정 파일, `.env` 파일은 Git에서 제외합니다.
 
 ## 자동 배포와 설치
 
-`v0.1.2` 같은 버전 태그를 푸시하면 테스트, **10개 OS·CPU 조합**의 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일(Windows는 ZIP, 나머지는 tar.gz)과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.2-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
+`v0.2.0` 같은 버전 태그를 푸시하면 테스트, **10개 OS·CPU 조합**의 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일(Windows는 ZIP, 나머지는 tar.gz)과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.2.0-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
 
 [GitHub Releases](https://github.com/uknowpro/netflow/releases)에 버전이 생성된 뒤 설치합니다.
 
 ```bash
 # 실제 배포된 버전으로 변경하세요. ARM 환경에서는 arm64를 사용합니다.
-VERSION=v0.1.2
+VERSION=v0.2.0
 ARCH=amd64
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
 curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
@@ -249,15 +299,15 @@ Kubernetes 예제의 이미지를 배포된 버전 또는 이미지 digest로 �
 배포 없이 로컬에서 패키지를 만들 수 있습니다.
 
 ```bash
-bash scripts/build-release.sh v0.1.2
-# 결과: dist/v0.1.2/ (Git 제외)
+bash scripts/build-release.sh v0.2.0
+# 결과: dist/v0.2.0/ (Git 제외)
 ```
 
 검토가 끝난 커밋을 배포할 때는 다음과 같이 실행합니다.
 
 ```bash
-git tag -a v0.1.2 -m "netflow v0.1.2"
-git push origin v0.1.2
+git tag -a v0.2.0 -m "netflow v0.2.0"
+git push origin v0.2.0
 ```
 
 자동 배포는 저장소 콘텐츠와 패키지 쓰기 권한을 가진 `GITHUB_TOKEN`을 사용합니다. 별도 레지스트리 비밀값은 필요하지 않지만 저장소·조직 정책에서 해당 권한을 허용해야 합니다. 기존 버전 태그를 다른 커밋으로 이동하지 마세요. GitHub Release 생성 전에 실패하면 이미지는 이미 올라갔을 수 있으므로 로그를 확인한 뒤 재시도합니다. 기존 GitHub Release를 덮어쓰지는 않습니다. 릴리스 공개 전 GitHub의 Linux·Windows·macOS x64·ARM64 실행 환경에서 네이티브 테스트를 통과해야 합니다. Linux 386·ARMv7과 FreeBSD는 교차 빌드만 검증하며 실제 AKS·VM 방화벽 경로는 해당 환경에서 별도로 검증합니다.
@@ -275,7 +325,7 @@ go build -o bin/netflow ./cmd/netflow
 
 테스트는 로컬 서버로 연결 성공·거부, 신뢰되지 않은 TLS 인증서 거부, HTTP 상태 검증, 리다이렉트 미추적, 시간 초과, 설정 검증, 위치 필터링, 재시도 횟수, JSON과 종료 코드를 확인합니다. 실제 AKS·VM의 방화벽 경로는 해당 환경에서 별도로 검증해야 합니다.
 
-CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 및 컨테이너 빌드를 수행합니다. 버전 문자열은 `go build -ldflags="-X main.version=v0.1.2" -o bin/netflow ./cmd/netflow`로 지정할 수 있습니다.
+CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 및 컨테이너 빌드를 수행합니다. 버전 문자열은 `go build -ldflags="-X main.version=v0.2.0" -o bin/netflow ./cmd/netflow`로 지정할 수 있습니다.
 
 ## 향후 확장
 
