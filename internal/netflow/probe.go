@@ -74,7 +74,7 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 	if err == nil && len(ips) == 0 {
 		err = fmt.Errorf("no addresses")
 	}
-	if !add("dns", start, err, classify(err, "DNS_ERROR")) {
+	if !add("dns", start, err, classifyStage(ctx, err, "DNS_ERROR")) {
 		return r
 	}
 	for _, ip := range ips {
@@ -98,7 +98,7 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 			break
 		}
 	}
-	if !add("tcp", start, err, classify(err, "CONNECT_ERROR")) {
+	if !add("tcp", start, err, classifyStage(ctx, err, "CONNECT_ERROR")) {
 		return r
 	}
 	defer conn.Close()
@@ -117,7 +117,7 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 		start = time.Now()
 		secure = tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: roots})
 		err = secure.HandshakeContext(ctx)
-		if !add("tls", start, err, classify(err, "TLS_ERROR")) {
+		if !add("tls", start, err, classifyStage(ctx, err, "TLS_ERROR")) {
 			return r
 		}
 	}
@@ -136,7 +136,7 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		add("http", start, err, classify(err, "HTTP_ERROR"))
+		add("http", start, err, classifyStage(ctx, err, "HTTP_ERROR"))
 		return r
 	}
 	defer resp.Body.Close()
@@ -155,6 +155,15 @@ func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertP
 	}
 	add("http", start, err, "HTTP_STATUS_MISMATCH")
 	return r
+}
+
+// Closing a connection at the context deadline may surface as a generic socket
+// error on some OSes. Preserve the originating timeout/cancellation diagnosis.
+func classifyStage(ctx context.Context, err error, fallback string) string {
+	if err != nil && ctx.Err() != nil {
+		return classify(ctx.Err(), fallback)
+	}
+	return classify(err, fallback)
 }
 func classify(err error, fallback string) string {
 	if err == nil {

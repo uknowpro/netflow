@@ -132,3 +132,19 @@ func TestAssessmentDoesNotClaimAuthentication(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestContextOwnsClosedSocketDiagnosis(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := classifyStage(ctx, net.ErrClosed, "HTTP_ERROR"); got != "CANCELED" {
+		t.Fatal(got)
+	}
+	ctx, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+	if got := classifyStage(ctx, net.ErrClosed, "HTTP_ERROR"); got != "TIMEOUT" {
+		t.Fatal(got)
+	}
+	if got := classifyStage(ctx, net.ErrClosed, "CONNECT_ERROR"); got != "CONNECT_TIMEOUT" {
+		t.Fatal(got)
+	}
+}

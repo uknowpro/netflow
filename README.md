@@ -229,13 +229,13 @@ Container networking may differ from the host's network path. Prefer the native 
 
 ## Releases and installation
 
-Pushing a version tag such as `v0.1.1` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.1.1-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
+Pushing a version tag such as `v0.1.2` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.1.2-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
 
 After a version appears in [GitHub Releases](https://github.com/uknowpro/netflow/releases):
 
 ```bash
 # Replace the version with an existing release; use arm64 for ARM machines.
-VERSION=v0.1.1
+VERSION=v0.1.2
 ARCH=amd64
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
 curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
@@ -253,15 +253,15 @@ For Kubernetes, replace the example image with the published version (or its dig
 Maintainers can prepare artifacts locally without publishing:
 
 ```bash
-bash scripts/build-release.sh v0.1.1
-# Output: dist/v0.1.1/ (ignored by Git)
+bash scripts/build-release.sh v0.1.2
+# Output: dist/v0.1.2/ (ignored by Git)
 ```
 
 To publish a reviewed commit:
 
 ```bash
-git tag -a v0.1.1 -m "netflow v0.1.1"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "netflow v0.1.2"
+git push origin v0.1.2
 ```
 
 The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. Release publication is gated on native Linux, Windows, and macOS tests on x64 and ARM64 GitHub runners. Linux 386/ARMv7 and FreeBSD binaries are cross-built only. Real AKS/VM firewall paths remain separate environment checks.
@@ -279,7 +279,7 @@ go build -o bin/netflow ./cmd/netflow
 
 Tests use local listeners and HTTP/TLS servers to verify connection success/refusal, TLS certificate rejection, HTTP status checks, redirect behavior, timeouts, configuration validation, execution-location filtering, retry counts, JSON output, and exit codes. Actual AKS/VM firewall paths require environment-specific validation.
 
-CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.1.1" -o bin/netflow ./cmd/netflow`.
+CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.1.2" -o bin/netflow ./cmd/netflow`.
 
 ## Roadmap
 

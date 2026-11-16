@@ -225,13 +225,13 @@ docker run --rm \
 
 ## 자동 배포와 설치
 
-`v0.1.1` 같은 버전 태그를 푸시하면 테스트, **10개 OS·CPU 조합**의 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일(Windows는 ZIP, 나머지는 tar.gz)과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.1-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
+`v0.1.2` 같은 버전 태그를 푸시하면 테스트, **10개 OS·CPU 조합**의 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일(Windows는 ZIP, 나머지는 tar.gz)과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.2-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
 
 [GitHub Releases](https://github.com/uknowpro/netflow/releases)에 버전이 생성된 뒤 설치합니다.
 
 ```bash
 # 실제 배포된 버전으로 변경하세요. ARM 환경에서는 arm64를 사용합니다.
-VERSION=v0.1.1
+VERSION=v0.1.2
 ARCH=amd64
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
 curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
@@ -249,15 +249,15 @@ Kubernetes 예제의 이미지를 배포된 버전 또는 이미지 digest로 �
 배포 없이 로컬에서 패키지를 만들 수 있습니다.
 
 ```bash
-bash scripts/build-release.sh v0.1.1
-# 결과: dist/v0.1.1/ (Git 제외)
+bash scripts/build-release.sh v0.1.2
+# 결과: dist/v0.1.2/ (Git 제외)
 ```
 
 검토가 끝난 커밋을 배포할 때는 다음과 같이 실행합니다.
 
 ```bash
-git tag -a v0.1.1 -m "netflow v0.1.1"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "netflow v0.1.2"
+git push origin v0.1.2
 ```
 
 자동 배포는 저장소 콘텐츠와 패키지 쓰기 권한을 가진 `GITHUB_TOKEN`을 사용합니다. 별도 레지스트리 비밀값은 필요하지 않지만 저장소·조직 정책에서 해당 권한을 허용해야 합니다. 기존 버전 태그를 다른 커밋으로 이동하지 마세요. GitHub Release 생성 전에 실패하면 이미지는 이미 올라갔을 수 있으므로 로그를 확인한 뒤 재시도합니다. 기존 GitHub Release를 덮어쓰지는 않습니다. 릴리스 공개 전 GitHub의 Linux·Windows·macOS x64·ARM64 실행 환경에서 네이티브 테스트를 통과해야 합니다. Linux 386·ARMv7과 FreeBSD는 교차 빌드만 검증하며 실제 AKS·VM 방화벽 경로는 해당 환경에서 별도로 검증합니다.
@@ -275,7 +275,7 @@ go build -o bin/netflow ./cmd/netflow
 
 테스트는 로컬 서버로 연결 성공·거부, 신뢰되지 않은 TLS 인증서 거부, HTTP 상태 검증, 리다이렉트 미추적, 시간 초과, 설정 검증, 위치 필터링, 재시도 횟수, JSON과 종료 코드를 확인합니다. 실제 AKS·VM의 방화벽 경로는 해당 환경에서 별도로 검증해야 합니다.
 
-CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 및 컨테이너 빌드를 수행합니다. 버전 문자열은 `go build -ldflags="-X main.version=v0.1.1" -o bin/netflow ./cmd/netflow`로 지정할 수 있습니다.
+CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 및 컨테이너 빌드를 수행합니다. 버전 문자열은 `go build -ldflags="-X main.version=v0.1.2" -o bin/netflow ./cmd/netflow`로 지정할 수 있습니다.
 
 ## 향후 확장
 
