@@ -1,0 +1,12 @@
+//go:build !windows
+
+package netflow
+
+import (
+	"errors"
+	"syscall"
+)
+
+func connectionRefused(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED)
+}

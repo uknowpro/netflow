@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -164,7 +163,7 @@ func classify(err error, fallback string) string {
 	if errors.Is(err, context.Canceled) {
 		return "CANCELED"
 	}
-	if errors.Is(err, syscall.ECONNREFUSED) {
+	if connectionRefused(err) {
 		return "CONNECTION_REFUSED"
 	}
 	var n net.Error
