@@ -2,13 +2,12 @@ package netflow
 
 import (
 	"context"
-	"encoding/pem"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -102,34 +101,34 @@ func TestConfigStrict(t *testing.T) {
 	}
 }
 
-// A subprocess gives the test a fresh system CA pool without modifying host trust.
 func TestTrustedHTTPS(t *testing.T) {
 	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 	defer s.Close()
-	dir := t.TempDir()
-	certPath := filepath.Join(dir, "ca.pem")
-	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw}), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTrustedHTTPSHelper$")
-	cmd.Env = append(os.Environ(), "NETFLOW_TEST_TLS_URL="+s.URL, "SSL_CERT_FILE="+certPath, "SSL_CERT_DIR="+dir)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("trusted TLS: %v\n%s", err, output)
-	}
-}
-func TestTrustedHTTPSHelper(t *testing.T) {
-	target := os.Getenv("NETFLOW_TEST_TLS_URL")
-	if target == "" {
-		t.Skip("subprocess helper")
-	}
-	r := Probe(context.Background(), Flow{ID: "https", Protocol: "https", URL: target}, 5*time.Second)
+	roots := x509.NewCertPool()
+	roots.AddCert(s.Certificate())
+	r := probe(context.Background(), Flow{ID: "https", Protocol: "https", URL: s.URL}, 5*time.Second, roots)
 	if r.Status != "PASS" || r.HTTPStatus != 200 || len(r.Stages) != 4 {
 		t.Fatalf("%+v", r)
 	}
-	u, _ := url.Parse(target)
+	u, _ := url.Parse(s.URL)
 	port, _ := strconv.Atoi(u.Port())
-	r = Probe(context.Background(), Flow{ID: "tls", Protocol: "tls", Host: u.Hostname(), Port: port}, 5*time.Second)
+	r = probe(context.Background(), Flow{ID: "tls", Protocol: "tls", Host: u.Hostname(), Port: port}, 5*time.Second, roots)
 	if r.Status != "PASS" || len(r.Stages) != 3 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAssessmentDoesNotClaimAuthentication(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
+	defer s.Close()
+	r := Probe(context.Background(), Flow{ID: "auth", Protocol: "http", URL: s.URL}, time.Second)
+	if r.Assessment.TCPConnectivity != "PASS" || r.Assessment.Authentication != "NOT_TESTED" || r.Assessment.FirewallVerdict != "UNKNOWN" || r.FailedStage != "http" {
+		t.Fatalf("%+v", r)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r = Probe(ctx, Flow{ID: "cancel", Protocol: "https", URL: s.URL}, time.Second)
+	if r.Status != "FAIL" || r.Stages[len(r.Stages)-1].Status != "NOT_TESTED" {
 		t.Fatalf("%+v", r)
 	}
 }

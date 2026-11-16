@@ -12,15 +12,30 @@ output="$root/dist/$version"
 mkdir -p "$output"
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
-for arch in amd64 arm64; do
-  package="netflow_${version}_linux_${arch}"
+archives=()
+for target in linux/amd64 linux/arm64 linux/arm linux/386 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 freebsd/arm64; do
+  os=${target%/*}
+  arch=${target#*/}
+  label=$arch
+  if [[ "$arch" == arm ]]; then label=armv7; fi
+  package="netflow_${version}_${os}_${label}"
+  binary=netflow
+  if [[ "$os" == windows ]]; then binary=netflow.exe; fi
   mkdir -p "$staging/$package"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GOARM=7 go build -trimpath \
     -ldflags="-s -w -X main.version=$version" \
-    -o "$staging/$package/netflow" ./cmd/netflow
+    -o "$staging/$package/$binary" ./cmd/netflow
   cp LICENSE README.md "$staging/$package/"
   cp -R docs examples "$staging/$package/"
-  tar -czf "$output/$package.tar.gz" -C "$staging" "$package"
+  if [[ "$os" == windows ]]; then
+    # Remove only this version's archive so zip cannot retain obsolete entries.
+    rm -f "$output/$package.zip"
+    (cd "$staging" && zip -qr "$output/$package.zip" "$package")
+    archives+=("$package.zip")
+  else
+    tar -czf "$output/$package.tar.gz" -C "$staging" "$package"
+    archives+=("$package.tar.gz")
+  fi
 done
-(cd "$output" && sha256sum "netflow_${version}_linux_amd64.tar.gz" "netflow_${version}_linux_arm64.tar.gz" > checksums.txt)
+(cd "$output" && sha256sum "${archives[@]}" > checksums.txt)
 printf 'Release assets: %s\n' "$output"

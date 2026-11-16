@@ -101,6 +101,7 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 			return fail(err)
 		}
 	}
+	source := nf.CollectSource(*vantage)
 	started := time.Now().UTC()
 	results := nf.Run(ctx, c.Flows, *vantage, t, c.Defaults.Retries, workers)
 	summary := map[string]int{"PASS": 0, "FAIL": 0, "UNKNOWN": 0, "SKIPPED": 0}
@@ -121,18 +122,39 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 			StartedAt     time.Time      `json:"started_at"`
 			Vantage       string         `json:"vantage"`
 			Version       string         `json:"version"`
+			Source        nf.Source      `json:"source"`
 			Summary       map[string]int `json:"summary"`
 			Results       []nf.Result    `json:"results"`
-		}{1, started.Format("20060102T150405.000000000Z"), started, *vantage, version, summary, results}
+		}{1, started.Format("20060102T150405.000000000Z"), started, *vantage, version, source, summary, results}
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			return fail(err)
 		}
 	} else {
-		fmt.Fprintf(out, "%-24s %-9s %-24s %s\n", "FLOW", "STATUS", "DETAIL", "TIME")
+		fmt.Fprintf(out, "Source: %s (%s/%s)  Vantage: %s\n", source.Hostname, source.OS, source.Architecture, source.Vantage)
+		if k := source.Kubernetes; k != nil {
+			fmt.Fprintf(out, "Pod: %s  Namespace: %s  Node: %s  Pod IP: %s (environment metadata)\n", k.PodName, k.Namespace, k.NodeName, k.PodIP)
+		}
+		fmt.Fprintln(out, "Source IP observed by target: UNKNOWN (NAT may change the local address)")
 		for _, r := range results {
-			fmt.Fprintf(out, "%-24s %-9s %-24s %dms\n", r.Flow.ID, r.Status, r.Code, r.DurationMS)
+			target := r.Flow.URL
+			if target == "" {
+				target = r.Flow.Host
+				if r.Flow.Port != 0 {
+					target = fmt.Sprintf("%s:%d", target, r.Flow.Port)
+				}
+			}
+			fmt.Fprintf(out, "\n[%s] %s  Target: %s  %dms\n", r.Status, r.Flow.ID, target, r.DurationMS)
+			if r.LocalAddress != "" {
+				fmt.Fprintf(out, "  Connection: %s -> %s (local socket, before NAT)\n", r.LocalAddress, r.RemoteAddress)
+			} else {
+				fmt.Fprintln(out, "  Connection source: UNKNOWN (no established TCP connection)")
+			}
+			for _, stage := range r.Stages {
+				fmt.Fprintf(out, "  %-14s %-12s %-24s %dms\n", stage.Name, stage.Status, stage.Code, stage.DurationMS)
+			}
+			fmt.Fprintf(out, "  authentication NOT_TESTED\n  %s\n", r.Assessment.Summary)
 		}
 		fmt.Fprintf(out, "\nPASS=%d FAIL=%d UNKNOWN=%d SKIPPED=%d\n", summary["PASS"], summary["FAIL"], summary["UNKNOWN"], summary["SKIPPED"])
 	}

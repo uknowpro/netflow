@@ -34,6 +34,18 @@ Outbound: 신규 AKS Pod [netflow] → 외부 DB / API / VM
 
 `vantage`는 운영자가 지정하는 실행 위치 이름입니다. 출발지 IP를 변경하거나 위치를 인증하는 기능이 아닙니다. NAT가 있으면 방화벽에 보이는 출발지 주소가 달라질 수 있으며, 보고서의 로컬 소켓 주소는 NAT 이전 주소입니다.
 
+## 지원 환경
+
+| 환경 | 배포 파일 / 이미지 | 검증 범위 |
+| --- | --- | --- |
+| Linux | amd64, arm64, armv7, 386 | x64·ARM64 네이티브 CI, ARMv7·386 교차 빌드 |
+| Windows | amd64, arm64 (`.exe`, ZIP) | x64·ARM64 네이티브 CI |
+| macOS | Intel amd64, Apple Silicon arm64 (`darwin` 파일) | Intel·Apple Silicon 네이티브 CI |
+| FreeBSD | amd64, arm64 | 실험적 지원: 교차 빌드만 검증 |
+| Docker / Podman / Kubernetes | Linux amd64, arm64 컨테이너 | 이미지 빌드·Linux amd64 기본 실행, 클러스터 경로 미검증 |
+
+VM, 물리 서버, WSL2, CI 실행기에서는 해당 OS·CPU에 맞는 파일을 사용합니다. AKS·EKS·GKE·온프레미스 Kubernetes와 개별 Linux 배포판별 네트워크 검증은 아직 수행하지 않았습니다. Windows 네이티브 컨테이너 이미지는 제공하지 않습니다. Windows PowerShell·macOS 설치법과 제약은 [플랫폼 지원 안내](SUPPORT.ko.md)를 참고하세요.
+
 ## 빠른 시작
 
 빌드에는 Go 1.26 이상이 필요합니다. 아래는 Linux 셸 기준이며 VM 실행에 Kubernetes는 필요하지 않습니다.
@@ -115,14 +127,27 @@ netflow test --config network-flows.yaml --vantage aks-app \
 
 알 수 없는 키, 중복 ID, 잘못된 값, 여러 YAML 문서, 1MiB를 초과하는 설정 파일은 거부합니다. 프로토콜 이름은 소문자입니다. `test`의 동시 실행 수는 기본 4이며 `--concurrency 1..64`로 조정합니다. `probe`는 `--timeout`, `--retries`를 지원하고 `test`는 YAML 설정을 사용합니다.
 
+## 출발지 정보와 검증 범위
+
+JSON의 `source`에 호스트명, 운영체제, CPU 종류, 실행 위치 이름, 활성 네트워크 인터페이스 주소 목록을 기록합니다. 인터페이스 주소는 보유 주소 목록이며 **연결 실패 시 실제 사용한 출발지 주소의 증거는 아닙니다**. 연결 성공 시 해당 연결의 `local_address`와 `remote_address`를 별도로 기록합니다. 실행 환경 네트워크가 지원하면 IPv4·IPv6를 사용할 수 있습니다.
+
+Kubernetes 예제는 Downward API로 `NETFLOW_POD_NAME`, `NETFLOW_POD_NAMESPACE`, `NETFLOW_NODE_NAME`, `NETFLOW_POD_IP`를 전달합니다. 환경변수로 제공된 정보임을 표시하며 Kubernetes·클라우드 메타데이터 API를 조회하거나 정보의 진위를 인증하지 않습니다. 없는 Pod 정보는 생략하고 호스트명·인터페이스 수집 오류는 경고로 남기되 통신 검사는 계속합니다. 외부 공인 IP 조회 서비스에는 접속하지 않습니다. NAT 이후 실제 관측 주소는 목적지 또는 인프라 로그로 확인해야 하므로 `observed_source_ip_status`는 `UNKNOWN`입니다.
+
+각 결과는 실패 단계인 `failed_stage`와 `assessment`를 포함합니다. TCP 연결 여부, 인증 미검증(`NOT_TESTED`), 방화벽 판정 불가(`UNKNOWN`)를 구분합니다. 앞선 단계가 실패하여 실행하지 못한 후속 단계는 `NOT_TESTED` / `NOT_REACHED`로 표시합니다. 단계별 미실행 표시는 기존 항목별 종료 코드 규칙을 변경하지 않습니다. TCP 성공은 DB 로그인·쿼리·방화벽 규칙·모든 백엔드 검증을 의미하지 않습니다. HTTP 401/403도 HTTP 응답과 기대 조건 결과로 표시하며 DB 인증 실패로 해석하지 않습니다.
+
 ## 결과 해석
 
 ```text
-FLOW                     STATUS    DETAIL                   TIME
-database-outbound        PASS                               12ms
-api-inbound              SKIPPED   VANTAGE_MISMATCH         0ms
+Source: worker-01 (linux/amd64)  Vantage: aks-app
+Pod: netflow-outbound  Namespace: apps  Node: worker-01  Pod IP: 10.10.1.15 (environment metadata)
+Source IP observed by target: UNKNOWN (NAT may change the local address)
 
-PASS=1 FAIL=0 UNKNOWN=0 SKIPPED=1
+[PASS] database-outbound  Target: db.internal.example:5432  12ms
+  Connection: 10.10.1.15:48236 -> 10.20.1.30:5432 (local socket, before NAT)
+  dns            PASS                                  3ms
+  tcp            PASS                                  9ms
+  authentication NOT_TESTED
+  TCP reachable; configured checks passed. Authentication not tested.
 ```
 
 | 상태 | 의미 |
@@ -200,7 +225,7 @@ docker run --rm \
 
 ## 자동 배포와 설치
 
-`v0.1.0` 같은 버전 태그를 푸시하면 테스트, Linux **amd64·arm64** 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.0-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
+`v0.1.0` 같은 버전 태그를 푸시하면 테스트, **10개 OS·CPU 조합**의 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일(Windows는 ZIP, 나머지는 tar.gz)과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.0-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
 
 [GitHub Releases](https://github.com/uknowpro/netflow/releases)에 버전이 생성된 뒤 설치합니다.
 
@@ -235,7 +260,7 @@ git tag -a v0.1.0 -m "netflow v0.1.0"
 git push origin v0.1.0
 ```
 
-자동 배포는 저장소 콘텐츠와 패키지 쓰기 권한을 가진 `GITHUB_TOKEN`을 사용합니다. 별도 레지스트리 비밀값은 필요하지 않지만 저장소·조직 정책에서 해당 권한을 허용해야 합니다. 기존 버전 태그를 다른 커밋으로 이동하지 마세요. GitHub Release 생성 전에 실패하면 이미지는 이미 올라갔을 수 있으므로 로그를 확인한 뒤 재시도합니다. 기존 GitHub Release를 덮어쓰지는 않습니다. ARM64는 교차 빌드하며 실제 ARM64 실행과 AKS·VM 방화벽 경로 검증은 해당 환경에서 별도로 수행합니다.
+자동 배포는 저장소 콘텐츠와 패키지 쓰기 권한을 가진 `GITHUB_TOKEN`을 사용합니다. 별도 레지스트리 비밀값은 필요하지 않지만 저장소·조직 정책에서 해당 권한을 허용해야 합니다. 기존 버전 태그를 다른 커밋으로 이동하지 마세요. GitHub Release 생성 전에 실패하면 이미지는 이미 올라갔을 수 있으므로 로그를 확인한 뒤 재시도합니다. 기존 GitHub Release를 덮어쓰지는 않습니다. 릴리스 공개 전 GitHub의 Linux·Windows·macOS x64·ARM64 실행 환경에서 네이티브 테스트를 통과해야 합니다. Linux 386·ARMv7과 FreeBSD는 교차 빌드만 검증하며 실제 AKS·VM 방화벽 경로는 해당 환경에서 별도로 검증합니다.
 
 구현 참고: [Docker 멀티 플랫폼 빌드](https://docs.docker.com/build/ci/github-actions/multi-platform/), [GitHub CLI 릴리스 생성](https://cli.github.com/manual/gh_release_create).
 

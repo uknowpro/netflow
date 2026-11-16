@@ -12,7 +12,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  platforms:
+    uses: ./.github/workflows/platform-tests.yml
   release:
+    needs: platforms
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -29,7 +32,7 @@ jobs:
           test -z "$(gofmt -l cmd internal)"
           go vet ./...
           go test -race -count=1 ./...
-      - name: Build Linux release archives
+      - name: Build cross-platform release archives
         env:
           VERSION: ${{ github.ref_name }}
         run: bash scripts/build-release.sh "$VERSION"
@@ -97,8 +100,8 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             flags+=(--prerelease)
           fi
-          printf 'Container: `%s`\n\nImage digest: `%s`\n\nLinux amd64 and arm64 archives and SHA-256 checksums are attached.\n' "$IMAGE" "$DIGEST" > release-notes.md
+          printf 'Container: `%s`\n\nImage digest: `%s`\n\nLinux, Windows, macOS and FreeBSD archives and SHA-256 checksums are attached. Native CI covers Linux, Windows and macOS; additional Linux architectures and FreeBSD are cross-built only. Source metadata and stage reports do not establish DB authentication or firewall rule verdicts.\n' "$IMAGE" "$DIGEST" > release-notes.md
           gh release create "$VERSION" \
-            "dist/$VERSION/"*.tar.gz "dist/$VERSION/checksums.txt" \
+            "dist/$VERSION/"*.tar.gz "dist/$VERSION/"*.zip "dist/$VERSION/checksums.txt" \
             --verify-tag --title "netflow $VERSION" --generate-notes \
             --notes-file release-notes.md "${flags[@]}"

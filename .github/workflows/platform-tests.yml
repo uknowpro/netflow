@@ -1,0 +1,30 @@
+name: Platform tests
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  native:
+    name: Native / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15-intel, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+      - name: Build and execute native CLI
+        run: |
+          go build -o netflow-smoke.exe ./cmd/netflow
+          ./netflow-smoke.exe version
+          ./netflow-smoke.exe probe --protocol dns --host localhost --output json

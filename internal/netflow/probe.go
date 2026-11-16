@@ -3,6 +3,7 @@ package netflow
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -21,21 +22,28 @@ type Stage struct {
 	DurationMS int64  `json:"duration_ms"`
 }
 type Result struct {
-	Flow          Flow     `json:"flow"`
-	Status        string   `json:"status"`
-	Code          string   `json:"code,omitempty"`
-	Attempts      int      `json:"attempts"`
-	DurationMS    int64    `json:"duration_ms"`
-	ResolvedIPs   []string `json:"resolved_ips,omitempty"`
-	LocalAddress  string   `json:"local_address,omitempty"`
-	RemoteAddress string   `json:"remote_address,omitempty"`
-	HTTPStatus    int      `json:"http_status,omitempty"`
-	Stages        []Stage  `json:"stages"`
+	Flow          Flow       `json:"flow"`
+	Status        string     `json:"status"`
+	Code          string     `json:"code,omitempty"`
+	Attempts      int        `json:"attempts"`
+	DurationMS    int64      `json:"duration_ms"`
+	ResolvedIPs   []string   `json:"resolved_ips,omitempty"`
+	LocalAddress  string     `json:"local_address,omitempty"`
+	RemoteAddress string     `json:"remote_address,omitempty"`
+	HTTPStatus    int        `json:"http_status,omitempty"`
+	Stages        []Stage    `json:"stages"`
+	FailedStage   string     `json:"failed_stage,omitempty"`
+	Assessment    Assessment `json:"assessment"`
 }
 
 func Probe(ctx context.Context, f Flow, timeout time.Duration) Result {
+	return probe(ctx, f, timeout, nil)
+}
+
+func probe(ctx context.Context, f Flow, timeout time.Duration, roots *x509.CertPool) (r Result) {
 	started := time.Now()
-	r := Result{Flow: f, Status: "PASS", Attempts: 1, Stages: []Stage{}}
+	r = Result{Flow: f, Status: "PASS", Attempts: 1, Stages: []Stage{}}
+	defer r.finalize()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	add := func(name string, start time.Time, err error, code string) bool {
@@ -108,7 +116,7 @@ func Probe(ctx context.Context, f Flow, timeout time.Duration) Result {
 	var secure *tls.Conn
 	if f.Protocol == "tls" || f.Protocol == "https" {
 		start = time.Now()
-		secure = tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+		secure = tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: roots})
 		err = secure.HandshakeContext(ctx)
 		if !add("tls", start, err, classify(err, "TLS_ERROR")) {
 			return r
@@ -180,6 +188,7 @@ func Run(ctx context.Context, flows []Flow, vantage string, timeout time.Duratio
 				f := flows[i]
 				if f.Vantage != "" && f.Vantage != vantage {
 					out[i] = Result{Flow: f, Status: "SKIPPED", Code: "VANTAGE_MISMATCH", Stages: []Stage{}}
+					out[i].finalize()
 					continue
 				}
 				start := time.Now()

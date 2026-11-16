@@ -38,6 +38,18 @@ Both directions use the same connection engine. **Execution location determines 
 
 `vantage` is an operator-supplied execution label, not a source IP binding or an attestation of location. NAT can change the address observed by a firewall. Reported local socket addresses are pre-NAT addresses.
 
+## Supported environments
+
+| Environment | Release binaries / image | Verification |
+| --- | --- | --- |
+| Linux | amd64, arm64, armv7, 386 | x64/ARM64 native CI; ARMv7/386 cross-build only |
+| Windows | amd64, arm64 (`.exe` in ZIP) | x64/ARM64 native CI |
+| macOS | Intel amd64, Apple Silicon arm64 (`darwin` archives) | Intel/Apple Silicon native CI |
+| FreeBSD | amd64, arm64 | Experimental: cross-build only |
+| Docker / Podman / Kubernetes | Linux amd64, arm64 container | Image build and Linux amd64 smoke test; cluster paths unverified |
+
+VMs, physical hosts, WSL2, CI agents, and Kubernetes distributions can run the matching executable or Linux container. AKS, EKS, GKE, on-premises Kubernetes, and individual Linux distributions have **not** been certified through environment-specific network tests. Native Windows containers are not provided. See [platform support and installation](docs/SUPPORT.md) for Windows PowerShell/macOS instructions, runtime requirements, and validation boundaries.
+
 ## Quick start
 
 Requires Go 1.26 or later to build. Commands below assume a shell on Linux; the CLI does not require Kubernetes when running on a VM.
@@ -119,14 +131,27 @@ Group selection happens before execution. Flows in other groups are omitted. Wit
 
 Unknown keys, duplicate flow IDs, invalid settings, multiple YAML documents, and configurations over 1 MiB are rejected. Protocol names are lowercase. Concurrency defaults to 4 and can be set with `--concurrency 1..64` on `test`. Probe supports `--timeout` and `--retries`; test reads them from YAML.
 
+## Source identity and verification scope
+
+Each JSON report includes a `source` object containing hostname, operating system, CPU architecture, the execution label, and addresses of active network interfaces. These interface addresses are an inventory, **not proof of the source address selected for a failed connection**. A successful connection records its actual `local_address` and `remote_address` separately per flow. IPv4 and IPv6 destinations are supported where the host network permits them.
+
+The Kubernetes example injects `NETFLOW_POD_NAME`, `NETFLOW_POD_NAMESPACE`, `NETFLOW_NODE_NAME`, and `NETFLOW_POD_IP` through the Downward API. They are labeled as environment metadata; netflow does not authenticate them or query the Kubernetes/cloud metadata APIs. Missing metadata is omitted; hostname/interface collection failures produce warnings without preventing probes. No public IP lookup service is contacted. `observed_source_ip_status` stays `UNKNOWN` because only the destination or infrastructure logs can establish the address after NAT.
+
+Each result includes `failed_stage` when applicable and an `assessment` separating TCP connectivity, authentication (`NOT_TESTED`), and firewall verdict (`UNKNOWN`). Remaining configured stages after a failure appear as `NOT_TESTED` / `NOT_REACHED`. These stage statuses do not change flow-level exit codes. TCP reachability does not validate DB login, queries, firewall rules, or all backend addresses. An HTTP 401/403 is reported as an HTTP response/expectation outcome, not a DB authentication diagnosis.
+
 ## Understand the results
 
 ```text
-FLOW                     STATUS    DETAIL                   TIME
-database-outbound        PASS                               12ms
-api-inbound              SKIPPED   VANTAGE_MISMATCH         0ms
+Source: worker-01 (linux/amd64)  Vantage: aks-app
+Pod: netflow-outbound  Namespace: apps  Node: worker-01  Pod IP: 10.10.1.15 (environment metadata)
+Source IP observed by target: UNKNOWN (NAT may change the local address)
 
-PASS=1 FAIL=0 UNKNOWN=0 SKIPPED=1
+[PASS] database-outbound  Target: db.internal.example:5432  12ms
+  Connection: 10.10.1.15:48236 -> 10.20.1.30:5432 (local socket, before NAT)
+  dns            PASS                                  3ms
+  tcp            PASS                                  9ms
+  authentication NOT_TESTED
+  TCP reachable; configured checks passed. Authentication not tested.
 ```
 
 | Status | Meaning |
@@ -204,7 +229,7 @@ Container networking may differ from the host's network path. Prefer the native 
 
 ## Releases and installation
 
-Pushing a version tag such as `v0.1.0` triggers the release workflow. It runs tests, packages Linux **amd64 and arm64** binaries, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt`. Prerelease tags such as `v0.1.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
+Pushing a version tag such as `v0.1.0` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.1.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
 
 After a version appears in [GitHub Releases](https://github.com/uknowpro/netflow/releases):
 
@@ -239,7 +264,7 @@ git tag -a v0.1.0 -m "netflow v0.1.0"
 git push origin v0.1.0
 ```
 
-The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. ARM64 assets are cross-built; execution on an actual ARM64 host and real AKS/VM firewall paths remain separate environment checks.
+The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. Release publication is gated on native Linux, Windows, and macOS tests on x64 and ARM64 GitHub runners. Linux 386/ARMv7 and FreeBSD binaries are cross-built only. Real AKS/VM firewall paths remain separate environment checks.
 
 Implementation references: [Docker multi-platform builds](https://docs.docker.com/build/ci/github-actions/multi-platform/) and [GitHub CLI release creation](https://cli.github.com/manual/gh_release_create).
 
