@@ -21,7 +21,7 @@
 x64는 `amd64`, Windows on ARM은 `arm64`를 선택합니다. 버전은 실제 배포 버전으로 바꾸세요.
 
 ```powershell
-$Version = 'v0.1.0'
+$Version = 'v0.1.1'
 $Arch = 'amd64'
 $Asset = "netflow_${Version}_windows_${Arch}.zip"
 $Base = "https://github.com/uknowpro/netflow/releases/download/$Version"
@@ -43,7 +43,7 @@ Windows에서는 Windows 인증서 신뢰 저장소를 사용하며 해당 프�
 Apple Silicon은 `arm64`, Intel은 `amd64`를 선택합니다.
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.1.1
 ARCH=arm64
 ASSET="netflow_${VERSION}_darwin_${ARCH}.tar.gz"
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"

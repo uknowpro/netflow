@@ -21,7 +21,7 @@ The release toolchain follows `go.mod` (Go 1.26). Runtime support is limited by 
 Select `amd64` for x64 or `arm64` for Windows on ARM. Replace the version with a published release.
 
 ```powershell
-$Version = 'v0.1.0'
+$Version = 'v0.1.1'
 $Arch = 'amd64'
 $Asset = "netflow_${Version}_windows_${Arch}.zip"
 $Base = "https://github.com/uknowpro/netflow/releases/download/$Version"
@@ -43,7 +43,7 @@ Windows native TLS uses the Windows trust store. Probes run with the network pol
 Choose `arm64` on Apple Silicon or `amd64` on Intel:
 
 ```bash
-VERSION=v0.1.0
+VERSION=v0.1.1
 ARCH=arm64
 ASSET="netflow_${VERSION}_darwin_${ARCH}.tar.gz"
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
