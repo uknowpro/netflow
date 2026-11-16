@@ -53,7 +53,7 @@ go build -trimpath -o bin/netflow ./cmd/netflow
 ./bin/netflow probe --protocol https --url https://api.example.com/health
 ```
 
-Example endpoints are placeholders. Replace them with your own authorized destinations. Prebuilt binaries and a published container image are not provided by this initial implementation.
+Example endpoints are placeholders. Replace them with your own authorized destinations. Tagged releases are built automatically; availability depends on a successful release workflow. See [Releases](https://github.com/uknowpro/netflow/releases) for published versions.
 
 ## Define network flows
 
@@ -202,6 +202,47 @@ Container networking may differ from the host's network path. Prefer the native 
 - Use endpoints that do not require embedded secrets. Configured URLs are included in JSON reports; do not put tokens in URL query strings. URL user-info credentials are rejected.
 - Reports can contain internal addresses and endpoint URLs; keep them in an appropriate location. `results/`, local configuration files, and `.env` files are ignored by Git.
 
+## Releases and installation
+
+Pushing a version tag such as `v0.1.0` triggers the release workflow. It runs tests, packages Linux **amd64 and arm64** binaries, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt`. Prerelease tags such as `v0.1.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
+
+After a version appears in [GitHub Releases](https://github.com/uknowpro/netflow/releases):
+
+```bash
+# Replace the version with an existing release; use arm64 for ARM machines.
+VERSION=v0.1.0
+ARCH=amd64
+BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
+curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
+curl --fail --location --remote-name "$BASE/checksums.txt"
+# Verify the downloaded architecture; the other archive is not downloaded here.
+grep " netflow_${VERSION}_linux_${ARCH}.tar.gz$" checksums.txt | sha256sum --check --strict
+tar -xzf "netflow_${VERSION}_linux_${ARCH}.tar.gz"
+"./netflow_${VERSION}_linux_${ARCH}/netflow" version
+
+docker run --rm "ghcr.io/uknowpro/netflow:$VERSION" version
+```
+
+For Kubernetes, replace the example image with the published version (or its digest). A newly created GHCR package may need its visibility set to public in GitHub package settings for anonymous pulls; otherwise configure registry credentials / `imagePullSecrets`. A public repository alone does not guarantee public package visibility.
+
+Maintainers can prepare artifacts locally without publishing:
+
+```bash
+bash scripts/build-release.sh v0.1.0
+# Output: dist/v0.1.0/ (ignored by Git)
+```
+
+To publish a reviewed commit:
+
+```bash
+git tag -a v0.1.0 -m "netflow v0.1.0"
+git push origin v0.1.0
+```
+
+The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. ARM64 assets are cross-built; execution on an actual ARM64 host and real AKS/VM firewall paths remain separate environment checks.
+
+Implementation references: [Docker multi-platform builds](https://docs.docker.com/build/ci/github-actions/multi-platform/) and [GitHub CLI release creation](https://cli.github.com/manual/gh_release_create).
+
 ## Development
 
 ```bash
@@ -220,7 +261,7 @@ CI runs formatting, static checks, race-enabled tests, a CLI build, and a contai
 - Protocol-aware UDP checks with explicit inconclusive results.
 - Authentication and private PKI configuration without exposing secrets in reports.
 - Multi-location report aggregation and optional remote probe agents.
-- Automated binary and container releases.
+- Environment-specific AKS and VM validation (requires access to the target networks).
 
 ## License
 

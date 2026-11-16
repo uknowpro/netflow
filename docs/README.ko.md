@@ -49,7 +49,7 @@ go build -trimpath -o bin/netflow ./cmd/netflow
 ./bin/netflow probe --protocol https --url https://api.example.com/health
 ```
 
-예제 주소는 실제 환경에 맞게 바꾸세요. 초기 구현에는 미리 빌드된 실행 파일과 공개 컨테이너 이미지 배포가 포함되지 않습니다.
+예제 주소는 실제 환경에 맞게 바꾸세요. 버전 태그를 올리면 자동 배포가 실행됩니다. 실제 배포된 버전은 [Releases](https://github.com/uknowpro/netflow/releases)에서 확인하세요.
 
 ## 설정과 실행
 
@@ -198,6 +198,47 @@ docker run --rm \
 - URL은 JSON에 포함됩니다. 쿼리 문자열에 토큰을 넣지 마세요. URL 사용자 정보 형식의 인증 정보는 거부합니다.
 - 보고서에는 내부 주소가 포함될 수 있습니다. `results/`, 로컬 설정 파일, `.env` 파일은 Git에서 제외합니다.
 
+## 자동 배포와 설치
+
+`v0.1.0` 같은 버전 태그를 푸시하면 테스트, Linux **amd64·arm64** 실행 파일 패키징, 네이티브 실행 파일·컨테이너 동작 확인을 수행합니다. 이후 `ghcr.io/uknowpro/netflow:<버전>`에 멀티 플랫폼 이미지를 올리고, 압축 파일과 `checksums.txt`가 첨부된 GitHub Release를 생성합니다. `v0.1.0-rc.1` 같은 태그는 사전 릴리스로 표시합니다. 이미지는 정확한 버전 태그만 제공하며 `latest`는 만들지 않습니다.
+
+[GitHub Releases](https://github.com/uknowpro/netflow/releases)에 버전이 생성된 뒤 설치합니다.
+
+```bash
+# 실제 배포된 버전으로 변경하세요. ARM 환경에서는 arm64를 사용합니다.
+VERSION=v0.1.0
+ARCH=amd64
+BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
+curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
+curl --fail --location --remote-name "$BASE/checksums.txt"
+# 내려받은 아키텍처의 파일만 검증합니다.
+grep " netflow_${VERSION}_linux_${ARCH}.tar.gz$" checksums.txt | sha256sum --check --strict
+tar -xzf "netflow_${VERSION}_linux_${ARCH}.tar.gz"
+"./netflow_${VERSION}_linux_${ARCH}/netflow" version
+
+docker run --rm "ghcr.io/uknowpro/netflow:$VERSION" version
+```
+
+Kubernetes 예제의 이미지를 배포된 버전 또는 이미지 digest로 바꾸면 됩니다. GHCR에 새로 생성한 패키지는 익명으로 내려받으려면 GitHub 패키지 설정에서 공개 범위 변경이 필요할 수 있습니다. 비공개라면 레지스트리 인증 또는 `imagePullSecrets`를 설정합니다. 저장소가 공개라고 패키지도 자동으로 공개되는 것은 아닙니다.
+
+배포 없이 로컬에서 패키지를 만들 수 있습니다.
+
+```bash
+bash scripts/build-release.sh v0.1.0
+# 결과: dist/v0.1.0/ (Git 제외)
+```
+
+검토가 끝난 커밋을 배포할 때는 다음과 같이 실행합니다.
+
+```bash
+git tag -a v0.1.0 -m "netflow v0.1.0"
+git push origin v0.1.0
+```
+
+자동 배포는 저장소 콘텐츠와 패키지 쓰기 권한을 가진 `GITHUB_TOKEN`을 사용합니다. 별도 레지스트리 비밀값은 필요하지 않지만 저장소·조직 정책에서 해당 권한을 허용해야 합니다. 기존 버전 태그를 다른 커밋으로 이동하지 마세요. GitHub Release 생성 전에 실패하면 이미지는 이미 올라갔을 수 있으므로 로그를 확인한 뒤 재시도합니다. 기존 GitHub Release를 덮어쓰지는 않습니다. ARM64는 교차 빌드하며 실제 ARM64 실행과 AKS·VM 방화벽 경로 검증은 해당 환경에서 별도로 수행합니다.
+
+구현 참고: [Docker 멀티 플랫폼 빌드](https://docs.docker.com/build/ci/github-actions/multi-platform/), [GitHub CLI 릴리스 생성](https://cli.github.com/manual/gh_release_create).
+
 ## 개발과 검증
 
 ```bash
@@ -216,7 +257,7 @@ CI는 포맷, 정적 검사, 경쟁 상태 검사 포함 테스트, CLI 빌드 �
 - 프로토콜별 응답을 확인하는 UDP 검증과 판정 불가 결과
 - 보고서에 비밀값을 노출하지 않는 인증·사설 PKI 설정
 - 여러 출발지의 결과 집계와 선택적 원격 에이전트
-- 실행 파일·컨테이너 자동 릴리스
+- 실제 AKS·VM 경로 검증: 해당 네트워크에 접근할 수 있는 환경에서 별도 수행
 
 ## 라이선스
 

@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting and test
+        run: |
+          test -z "$(gofmt -l cmd internal)"
+          go vet ./...
+          go test -race -count=1 ./...
+      - name: Build Linux release archives
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: bash scripts/build-release.sh "$VERSION"
+      - name: Verify native release binary
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          cd "dist/$VERSION"
+          sha256sum --check checksums.txt
+          tar -xzf "netflow_${VERSION}_linux_amd64.tar.gz"
+          test "$("netflow_${VERSION}_linux_amd64/netflow" version)" = "netflow $VERSION"
+          "netflow_${VERSION}_linux_amd64/netflow" probe --protocol dns --host localhost --output json
+      - name: Prepare image metadata
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "tag=$image:$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Build and test native container
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: netflow:release-test
+          build-args: VERSION=${{ github.ref_name }}
+      - name: Verify container execution
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          test "$(docker run --rm --read-only --cap-drop ALL netflow:release-test version)" = "netflow $VERSION"
+          docker run --rm --read-only --cap-drop ALL netflow:release-test probe --protocol dns --host localhost --output json
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish multi-platform image
+        id: publish
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.image.outputs.tag }}
+          build-args: VERSION=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ github.ref_name }}
+          IMAGE: ${{ steps.image.outputs.tag }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          flags=()
+          if [[ "$VERSION" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          printf 'Container: `%s`\n\nImage digest: `%s`\n\nLinux amd64 and arm64 archives and SHA-256 checksums are attached.\n' "$IMAGE" "$DIGEST" > release-notes.md
+          gh release create "$VERSION" \
+            "dist/$VERSION/"*.tar.gz "dist/$VERSION/checksums.txt" \
+            --verify-tag --title "netflow $VERSION" --generate-notes \
+            --notes-file release-notes.md "${flags[@]}"

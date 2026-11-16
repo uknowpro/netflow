@@ -18,5 +18,10 @@ jobs:
       - run: go vet ./...
       - run: go test -race -count=1 ./...
       - run: go build ./cmd/netflow
+      - name: Check release packaging
+        run: |
+          bash scripts/build-release.sh v0.0.0-ci
+          cd dist/v0.0.0-ci
+          sha256sum --check checksums.txt
       - name: Build container
         run: docker build -t netflow:ci .
