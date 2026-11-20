@@ -174,6 +174,25 @@ func run(ctx context.Context, args []string, out, errs io.Writer) int {
 				}
 			}
 			fmt.Fprintf(out, "\n[%s] %s  Target: %s  %dms\n", r.Status, r.Flow.ID, target, r.DurationMS)
+			if r.Flow.SourceEnvironment != "" {
+				fmt.Fprintf(out, "  Declared source environment: %s (operator-provided)\n", r.Flow.SourceEnvironment)
+			}
+			if len(r.Flow.ExpectedPath) > 0 {
+				fmt.Fprintln(out, "  Expected path: operator-declared; verification NOT_TESTED")
+				for i, point := range r.Flow.ExpectedPath {
+					fmt.Fprintf(out, "    %d. %s (%s)\n", i+1, point.Name, point.Type)
+				}
+			}
+			if r.Flow.Protocol == "http" || r.Flow.Protocol == "https" {
+				if len(r.Flow.Expect.Status) == 0 {
+					fmt.Fprintln(out, "  Expected HTTP status: 200–299")
+				} else {
+					fmt.Fprintf(out, "  Expected HTTP status: %v\n", r.Flow.Expect.Status)
+				}
+				if r.HTTPStatus != 0 {
+					fmt.Fprintf(out, "  Observed HTTP status: %d\n", r.HTTPStatus)
+				}
+			}
 			if r.LocalAddress != "" {
 				fmt.Fprintf(out, "  Connection: %s -> %s (local socket, before NAT)\n", r.LocalAddress, r.RemoteAddress)
 			} else {

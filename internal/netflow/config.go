@@ -22,18 +22,27 @@ type Defaults struct {
 	Retries int    `yaml:"retries"`
 }
 type Expect struct {
-	Status []int `yaml:"status"`
+	Status []int `yaml:"status" json:"status,omitempty"`
 }
+
+// ControlPoint is an operator-declared expected hop, never discovered evidence.
+type ControlPoint struct {
+	Type string `yaml:"type" json:"type"`
+	Name string `yaml:"name" json:"name"`
+}
+
 type Flow struct {
-	ID        string `yaml:"id" json:"id"`
-	Group     string `yaml:"group" json:"group,omitempty"`
-	Direction string `yaml:"direction" json:"direction,omitempty"`
-	Vantage   string `yaml:"vantage" json:"vantage,omitempty"`
-	Protocol  string `yaml:"protocol" json:"protocol"`
-	Host      string `yaml:"host" json:"host,omitempty"`
-	Port      int    `yaml:"port" json:"port,omitempty"`
-	URL       string `yaml:"url" json:"url,omitempty"`
-	Expect    Expect `yaml:"expect" json:"-"`
+	SourceEnvironment string         `yaml:"source_environment" json:"source_environment,omitempty"`
+	ExpectedPath      []ControlPoint `yaml:"expected_path" json:"expected_path,omitempty"`
+	ID                string         `yaml:"id" json:"id"`
+	Group             string         `yaml:"group" json:"group,omitempty"`
+	Direction         string         `yaml:"direction" json:"direction,omitempty"`
+	Vantage           string         `yaml:"vantage" json:"vantage,omitempty"`
+	Protocol          string         `yaml:"protocol" json:"protocol"`
+	Host              string         `yaml:"host" json:"host,omitempty"`
+	Port              int            `yaml:"port" json:"port,omitempty"`
+	URL               string         `yaml:"url" json:"url,omitempty"`
+	Expect            Expect         `yaml:"expect" json:"expect"`
 }
 
 func Load(path string) (Config, time.Duration, error) {
@@ -93,6 +102,25 @@ func (c Config) Validate() (time.Duration, error) {
 	return t, nil
 }
 func (f Flow) Validate() error {
+	switch f.SourceEnvironment {
+	case "", "aks", "vm":
+	default:
+		return fmt.Errorf("source_environment must be aks or vm")
+	}
+	if len(f.ExpectedPath) > 32 {
+		return fmt.Errorf("expected_path must contain at most 32 control points")
+	}
+	for _, point := range f.ExpectedPath {
+		switch point.Type {
+		case "external_firewall", "external_waf", "nsg", "application_gateway", "on_prem_firewall", "network_policy", "other":
+		default:
+			return fmt.Errorf("unsupported expected_path type %q", point.Type)
+		}
+		if strings.TrimSpace(point.Name) == "" || len(point.Name) > 200 || strings.ContainsAny(point.Name, "\r\n\t\x1b") {
+			return fmt.Errorf("expected_path name must be nonempty, at most 200 bytes, and contain no control whitespace or escape")
+		}
+	}
+
 	if f.Direction != "" && f.Direction != "inbound" && f.Direction != "outbound" {
 		return fmt.Errorf("direction must be inbound or outbound")
 	}

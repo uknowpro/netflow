@@ -23,6 +23,28 @@ netflow는 환경 이전과 방화벽 변경 후 실제 연결 가능 여부를 
 - **자동화 연동:** 엄격한 YAML 설정 검증, 제한된 동시 실행·재시도, JSON 보고서와 종료 코드를 제공합니다.
 - **간단한 배포:** Go 실행 파일과 컨테이너로 실행하며 클러스터 API 접근이나 네트워크 특권이 필요하지 않습니다.
 
+## AKS·VM 제어 지점별 검사
+
+환경별 예제: [AKS](../examples/aks-flows.yaml), [Azure VM](../examples/azure-vm-flows.yaml), [온프레미스 VM](../examples/onprem-vm-flows.yaml). 예제는 가상의 경로입니다. 목적지, 장비 이름, 순서를 실제 구성으로 바꾸세요. Inbound/Outbound는 대상 AKS 시스템 기준입니다.
+
+```bash
+# 각 명령은 해당 출발지에서 실행합니다. 새 필드를 지원하는 빌드가 필요합니다.
+netflow test --config examples/aks-flows.yaml --vantage aks --output json
+netflow test --config examples/azure-vm-flows.yaml --vantage azure-vm
+netflow test --config examples/onprem-vm-flows.yaml --vantage onprem-vm
+```
+
+선택 필드 `source_environment`는 `aks` 또는 `vm`이라는 사용자 선언입니다. 실행 환경을 자동 탐지하거나 강제하지 않으며, 기존 `vantage`가 실행 위치 이름을 대조합니다. `expected_path`는 예상 경유 순서대로 작성하는 `{type, name}` 목록입니다. 최대 32개, 이름은 1–200바이트이며 지원 유형은 `external_firewall`, `external_waf`, `nsg`, `application_gateway`, `on_prem_firewall`, `network_policy`, `other`입니다. 기존 version 1 설정은 그대로 지원합니다. 구버전 실행 파일은 새 필드를 거부하므로 해당 기능이 릴리스되기 전에는 최신 소스를 빌드하세요.
+
+터미널은 경로를 사용자 선언·미검증으로 표시합니다. JSON의 `results[].flow`에 선언을 보존하고, 경로가 있으면 PASS·SKIPPED 여부와 관계없이 `assessment.expected_path_verification`을 `NOT_TESTED`로 표시합니다. `flow.expect.status`에는 명시한 기대 HTTP 상태를 기록하며 빈 객체는 기본값 200–299를 뜻합니다. 터미널에서도 기대 상태와 실제 HTTP 상태를 구별합니다. 예상 장비를 실제 관측 단계나 장비별 PASS로 표시하지 않습니다.
+
+WAF·Application Gateway는 실제 서비스 FQDN으로 검사하여 HTTP Host와 TLS SNI가 맞도록 하세요. DNS는 실행 환경의 리졸버를 사용하므로 사설·분할 DNS도 해당 환경에 따라 해석됩니다. TCP PASS는 해석된 주소 중 하나에 연결했다는 의미입니다. HTTP PASS는 설정한 응답 조건만 만족했다는 뜻입니다. 예를 들어 403을 기대값으로 지정하면 PASS여도 서비스 접근·인증 성공은 아닙니다. 403이나 타임아웃만으로 차단 장비를 특정할 수 없습니다.
+
+AKS Job에서는 기존 ConfigMap 예제를 이용해 선택한 파일을 `network-flows.yaml`로 마운트하고 Job의 `--vantage`, `--group`을 `aks`로 바꾸세요. 애플리케이션의 네임스페이스·라벨·실행 신원·DNS·노드/네트워크·서비스 메시 조건을 맞추세요. VM 자체 경로는 네이티브 실행 파일로 검사하는 것이 적합합니다. 임시 TCP receiver로는 WAF의 HTTP 경로를 검증할 수 없으므로 실제 허용된 HTTP(S) 상태 확인 엔드포인트를 사용하세요.
+
+장애 분석 시 보고서의 UTC 시작 시각, flow ID, 로컬/원격 소켓 주소, HTTP 상태를 해당 방화벽·WAF·NSG·게이트웨이 로그와 대조하세요. NAT·프록시가 주소를 바꿀 수 있습니다. netflow는 장비 로그 조회, 경로 자동 탐지, 규칙 분석, 차단 장비 확정을 수행하지 않습니다. 실제 AKS·VM·온프레미스 경로는 현장에서 실행하기 전까지 미검증입니다.
+
+
 ## Inbound와 Outbound
 
 ```text

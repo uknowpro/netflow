@@ -1,0 +1,34 @@
+# Illustrative topology only. Replace endpoints and the ordered path with your actual design.
+# Metadata does not configure routing or verify individual control points.
+version: 1
+defaults:
+  timeout: 5s
+  retries: 0
+flows:
+  - id: aks-onprem-db
+    group: aks
+    direction: outbound
+    vantage: aks
+    source_environment: aks
+    protocol: tcp
+    host: db.corp.example
+    port: 5432
+    expected_path:
+      - type: nsg
+        name: aks-subnet-nsg
+      - type: on_prem_firewall
+        name: datacenter-fw
+  - id: aks-external-api
+    group: aks
+    direction: outbound
+    vantage: aks
+    source_environment: aks
+    protocol: https
+    url: https://api.example.com/health
+    expect:
+      status: [200]
+    expected_path:
+      - type: external_firewall
+        name: egress-fw
+      - type: external_waf
+        name: public-api-waf

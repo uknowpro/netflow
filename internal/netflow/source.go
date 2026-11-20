@@ -68,10 +68,11 @@ func CollectSource(vantage string) Source {
 }
 
 type Assessment struct {
-	TCPConnectivity string `json:"tcp_connectivity"`
-	Authentication  string `json:"authentication"`
-	FirewallVerdict string `json:"firewall_verdict"`
-	Summary         string `json:"summary"`
+	ExpectedPathVerification string `json:"expected_path_verification,omitempty"`
+	TCPConnectivity          string `json:"tcp_connectivity"`
+	Authentication           string `json:"authentication"`
+	FirewallVerdict          string `json:"firewall_verdict"`
+	Summary                  string `json:"summary"`
 }
 
 func (r *Result) finalize() {
@@ -87,6 +88,9 @@ func (r *Result) finalize() {
 	}
 	seen := map[string]bool{}
 	r.Assessment = Assessment{TCPConnectivity: "NOT_TESTED", Authentication: "NOT_TESTED", FirewallVerdict: "UNKNOWN"}
+	if len(r.Flow.ExpectedPath) > 0 {
+		r.Assessment.ExpectedPathVerification = "NOT_TESTED"
+	}
 	for _, s := range r.Stages {
 		seen[s.Name] = true
 		if s.Status == "FAIL" {

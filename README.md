@@ -23,6 +23,28 @@ netflow is a small, active network verification CLI for migration checks and fir
 - **Automation friendly:** strict YAML input, bounded concurrency and retries, JSON output, and meaningful exit codes.
 - **Small deployment footprint:** a Go executable; no controller, cluster API access, or privileged networking required.
 
+## AKS and VM control-point checks
+
+Environment-specific templates: [AKS](examples/aks-flows.yaml), [Azure VM](examples/azure-vm-flows.yaml), and [on-premises VM](examples/onprem-vm-flows.yaml). These are illustrative paths, not discovered topology. Replace every endpoint, control-point name, and ordering with your actual design. Inbound/outbound is relative to the target AKS system.
+
+```bash
+# Run each command on its actual source; use a build containing these new fields.
+netflow test --config examples/aks-flows.yaml --vantage aks --output json
+netflow test --config examples/azure-vm-flows.yaml --vantage azure-vm
+netflow test --config examples/onprem-vm-flows.yaml --vantage onprem-vm
+```
+
+`source_environment` optionally declares `aks` or `vm`; it does not detect or enforce the runtime. `vantage` remains the execution-label guard. `expected_path` is an ordered list of `{type, name}` declarations (maximum 32; names 1–200 bytes). Supported types: `external_firewall`, `external_waf`, `nsg`, `application_gateway`, `on_prem_firewall`, `network_policy`, `other`. These optional fields preserve existing version-1 configurations. Older binaries reject the new keys; build the current source until a release containing them is available.
+
+Terminal output explicitly marks the expected path as operator-declared and unverified. JSON retains declarations under `results[].flow`; `assessment.expected_path_verification` is `NOT_TESTED` whenever a path is declared, including PASS and SKIPPED results. `flow.expect.status` records explicit HTTP expectations (an empty object means the default 200–299 range). The expected and observed HTTP statuses also appear in terminal output. Declared hops never become measured stages or per-device PASS results.
+
+Use the real service FQDN for WAF/Application Gateway checks so HTTP Host and TLS SNI identify the intended service. The runtime DNS resolver determines the addresses, including private/split DNS. A TCP PASS proves one resolved address accepted a connection; it does not prove all backends work. An HTTP PASS proves only the configured response expectation: accepting 403 explicitly does not establish application access or authentication. Neither 403 nor a timeout identifies the blocking appliance.
+
+For an AKS Job, mount the selected file as `network-flows.yaml` using the existing Job/ConfigMap example and change its `--vantage` and `--group` to `aks`. Match the application's namespace, labels, identity, DNS, node/network and service-mesh conditions. On VMs, prefer the native executable when testing the host's path. A temporary TCP receiver does not validate a WAF's HTTP path; use a real authorized HTTP(S) health endpoint.
+
+For incident correlation, retain the report's UTC start time, flow ID, local/remote socket addresses and HTTP status, then compare them with the relevant firewall/WAF/NSG/gateway logs. NAT and proxies may change addresses; netflow does not query these logs, discover hops, inspect rules, or attribute failures to a particular appliance. Real AKS, VM and on-premises paths remain unverified until you run these checks there.
+
+
 ## How inbound and outbound work
 
 ```text

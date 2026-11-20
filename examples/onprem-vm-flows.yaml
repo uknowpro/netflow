@@ -1,0 +1,25 @@
+# Illustrative topology only. Replace endpoints and the ordered path with your actual design.
+# Metadata does not configure routing or verify individual control points.
+version: 1
+defaults:
+  timeout: 5s
+  retries: 0
+flows:
+  - id: onprem-aks-app
+    group: onprem-vm
+    direction: inbound
+    vantage: onprem-vm
+    source_environment: vm
+    protocol: https
+    url: https://app.example.com/health
+    expect:
+      status: [200]
+    expected_path:
+      - type: on_prem_firewall
+        name: datacenter-fw
+      - type: external_firewall
+        name: edge-fw
+      - type: external_waf
+        name: edge-waf
+      - type: application_gateway
+        name: appgw
