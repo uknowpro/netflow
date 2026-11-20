@@ -17,7 +17,7 @@ spec:
       type: RuntimeDefault
   containers:
     - name: netflow
-      image: ghcr.io/uknowpro/netflow:v0.2.0
+      image: ghcr.io/uknowpro/netflow:v0.3.0
       args: [serve, --listen, '0.0.0.0:8080', --duration, 10m, --output, json]
       ports:
         - name: probe

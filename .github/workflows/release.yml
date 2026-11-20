@@ -100,7 +100,7 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then
             flags+=(--prerelease)
           fi
-          printf 'Container: `%s`\n\nImage digest: `%s`\n\nLinux, Windows, macOS and FreeBSD archives and SHA-256 checksums are attached. Native CI covers Linux, Windows and macOS; additional Linux architectures and FreeBSD are cross-built only. Includes repeated probes with success/latency statistics and a temporary TCP receiver that logs socket-observed source addresses. Source metadata and stage reports do not establish DB authentication or firewall rule verdicts.\n' "$IMAGE" "$DIGEST" > release-notes.md
+          printf 'Container: `%s`\n\nImage digest: `%s`\n\nLinux, Windows, macOS and FreeBSD archives and SHA-256 checksums are attached. Native CI covers Linux, Windows and macOS; additional Linux architectures and FreeBSD are cross-built only. Includes AKS, Azure VM and on-premises VM configuration templates, operator-declared expected control points (explicitly unverified), and expected/observed HTTP status reporting. Also includes repeated probes and a temporary TCP receiver. Source metadata and stage reports do not establish DB authentication or firewall rule verdicts.\n' "$IMAGE" "$DIGEST" > release-notes.md
           gh release create "$VERSION" \
             "dist/$VERSION/"*.tar.gz "dist/$VERSION/"*.zip "dist/$VERSION/checksums.txt" \
             --verify-tag --title "netflow $VERSION" --generate-notes \

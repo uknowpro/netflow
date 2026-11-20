@@ -34,7 +34,7 @@ netflow test --config examples/azure-vm-flows.yaml --vantage azure-vm
 netflow test --config examples/onprem-vm-flows.yaml --vantage onprem-vm
 ```
 
-`source_environment` optionally declares `aks` or `vm`; it does not detect or enforce the runtime. `vantage` remains the execution-label guard. `expected_path` is an ordered list of `{type, name}` declarations (maximum 32; names 1–200 bytes). Supported types: `external_firewall`, `external_waf`, `nsg`, `application_gateway`, `on_prem_firewall`, `network_policy`, `other`. These optional fields preserve existing version-1 configurations. Older binaries reject the new keys; build the current source until a release containing them is available.
+`source_environment` optionally declares `aks` or `vm`; it does not detect or enforce the runtime. `vantage` remains the execution-label guard. `expected_path` is an ordered list of `{type, name}` declarations (maximum 32; names 1–200 bytes). Supported types: `external_firewall`, `external_waf`, `nsg`, `application_gateway`, `on_prem_firewall`, `network_policy`, `other`. These optional fields preserve existing version-1 configurations. These fields require v0.3.0 or later; older binaries reject the new keys.
 
 Terminal output explicitly marks the expected path as operator-declared and unverified. JSON retains declarations under `results[].flow`; `assessment.expected_path_verification` is `NOT_TESTED` whenever a path is declared, including PASS and SKIPPED results. `flow.expect.status` records explicit HTTP expectations (an empty object means the default 200–299 range). The expected and observed HTTP statuses also appear in terminal output. Declared hops never become measured stages or per-device PASS results.
 
@@ -190,7 +190,7 @@ The default bind is `127.0.0.1:8080`; IPv6 can use `[::]:8080`. Duration default
 For containers:
 
 ```bash
-docker run --rm -p 8080:8080 ghcr.io/uknowpro/netflow:v0.2.0 \
+docker run --rm -p 8080:8080 ghcr.io/uknowpro/netflow:v0.3.0 \
   serve --listen 0.0.0.0:8080 --duration 10m --output json
 ```
 
@@ -301,13 +301,13 @@ Container networking may differ from the host's network path. Prefer the native 
 
 ## Releases and installation
 
-Pushing a version tag such as `v0.2.0` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.2.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
+Pushing a version tag such as `v0.3.0` triggers the release workflow. It runs tests, packages binaries for **10 OS/CPU combinations**, verifies the native executable and container, publishes a multi-platform image to `ghcr.io/uknowpro/netflow:<version>`, and then creates a GitHub Release with archives and `checksums.txt` (Windows ZIP; other platforms tar.gz). Prerelease tags such as `v0.3.0-rc.1` are marked as prereleases. Images use exact version tags; no moving `latest` tag is published.
 
 After a version appears in [GitHub Releases](https://github.com/uknowpro/netflow/releases):
 
 ```bash
 # Replace the version with an existing release; use arm64 for ARM machines.
-VERSION=v0.2.0
+VERSION=v0.3.0
 ARCH=amd64
 BASE="https://github.com/uknowpro/netflow/releases/download/$VERSION"
 curl --fail --location --remote-name "$BASE/netflow_${VERSION}_linux_${ARCH}.tar.gz"
@@ -325,15 +325,15 @@ For Kubernetes, replace the example image with the published version (or its dig
 Maintainers can prepare artifacts locally without publishing:
 
 ```bash
-bash scripts/build-release.sh v0.2.0
-# Output: dist/v0.2.0/ (ignored by Git)
+bash scripts/build-release.sh v0.3.0
+# Output: dist/v0.3.0/ (ignored by Git)
 ```
 
 To publish a reviewed commit:
 
 ```bash
-git tag -a v0.2.0 -m "netflow v0.2.0"
-git push origin v0.2.0
+git tag -a v0.3.0 -m "netflow v0.3.0"
+git push origin v0.3.0
 ```
 
 The workflow uses `GITHUB_TOKEN` with repository-content and package write permissions; no additional registry secret is required. Repository or organization policies must allow these permissions. Release tags are versioned outputs: do not move an existing tag. If a run fails before creating the GitHub Release, inspect the logs before retrying; an image may already have been pushed. The workflow does not overwrite existing GitHub Releases. Release publication is gated on native Linux, Windows, and macOS tests on x64 and ARM64 GitHub runners. Linux 386/ARMv7 and FreeBSD binaries are cross-built only. Real AKS/VM firewall paths remain separate environment checks.
@@ -351,7 +351,7 @@ go build -o bin/netflow ./cmd/netflow
 
 Tests use local listeners and HTTP/TLS servers to verify connection success/refusal, TLS certificate rejection, HTTP status checks, redirect behavior, timeouts, configuration validation, execution-location filtering, retry counts, JSON output, and exit codes. Actual AKS/VM firewall paths require environment-specific validation.
 
-CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.2.0" -o bin/netflow ./cmd/netflow`.
+CI runs formatting, static checks, race-enabled tests, a CLI build, and a container build. Set a version string for your own build with `go build -ldflags="-X main.version=v0.3.0" -o bin/netflow ./cmd/netflow`.
 
 ## Roadmap
 
