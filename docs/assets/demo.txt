@@ -1,0 +1,49 @@
+netflow v0.3.0 | Linux loopback demo
+Real CLI output excerpts; only the source header is omitted.
+Local HTTP fixtures: /health=200, /denied=403, /slow=500ms delay.
+Not an Azure/AKS/firewall test. Ports and timings vary.
+
+HTTP 200: checks passed
+$ netflow probe --protocol http --url http://127.0.0.1:46435/health --timeout 200ms
+[PASS] probe  Target: http://127.0.0.1:46435/health  0ms
+  Expected HTTP status: 200–299
+  Observed HTTP status: 200
+  Connection: 127.0.0.1:45504 -> 127.0.0.1:46435 (local socket, before NAT)
+  dns            PASS                                  0ms
+  tcp            PASS                                  0ms
+  http           PASS                                  0ms
+  authentication NOT_TESTED
+  TCP reachable; configured checks passed. Authentication not tested.
+
+PASS=1 FAIL=0 UNKNOWN=0 SKIPPED=0
+Exit code: 0
+
+HTTP 403: TCP passed, HTTP failed
+$ netflow probe --protocol http --url http://127.0.0.1:46435/denied --timeout 200ms
+[FAIL] probe  Target: http://127.0.0.1:46435/denied  0ms
+  Expected HTTP status: 200–299
+  Observed HTTP status: 403
+  Connection: 127.0.0.1:45512 -> 127.0.0.1:46435 (local socket, before NAT)
+  dns            PASS                                  0ms
+  tcp            PASS                                  0ms
+  http           FAIL         HTTP_STATUS_MISMATCH     0ms
+  authentication NOT_TESTED
+  TCP reachable; a later check failed. Authentication not tested.
+
+PASS=0 FAIL=1 UNKNOWN=0 SKIPPED=0
+Exit code: 1
+
+Slow response: TCP passed, HTTP timed out
+$ netflow probe --protocol http --url http://127.0.0.1:46435/slow --timeout 200ms
+[FAIL] probe  Target: http://127.0.0.1:46435/slow  201ms
+  Expected HTTP status: 200–299
+  Connection: 127.0.0.1:45520 -> 127.0.0.1:46435 (local socket, before NAT)
+  dns            PASS                                  0ms
+  tcp            PASS                                  0ms
+  http           FAIL         TIMEOUT                  200ms
+  authentication NOT_TESTED
+  TCP reachable; a later check failed. Authentication not tested.
+
+PASS=0 FAIL=1 UNKNOWN=0 SKIPPED=0
+Exit code: 1
+
