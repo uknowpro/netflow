@@ -44,7 +44,7 @@ TCP 연결은 성공했지만 HTTP 응답이 기본 기대값 200–299에 맞�
 
 ## 빠른 시작
 
-[v0.3.0 Releases](https://github.com/uknowpro/netflow/releases/tag/v0.3.0)에서 OS·CPU에 맞는 파일을 내려받고 체크섬을 검증하세요. 압축을 풀고 `netflow`(Windows는 `netflow.exe`)를 PATH에 추가합니다. [설치 방법](SUPPORT.ko.md)
+[v0.3.1 Releases](https://github.com/uknowpro/netflow/releases/tag/v0.3.1)에서 OS·CPU에 맞는 파일을 내려받고 체크섬을 검증하세요. 압축을 풀고 `netflow`(Windows는 `netflow.exe`)를 PATH에 추가합니다. [설치 방법](SUPPORT.ko.md)
 
 ```bash
 # DB 포트: TCP 연결 확인이며 DB 로그인 검사는 아닙니다.
@@ -57,7 +57,7 @@ netflow probe --protocol https --url https://api.example.com/health
 netflow probe --host db.internal.example --port 5432 --count 20 --output json
 ```
 
-예시 도메인을 검사할 실제 목적지로 바꾸세요. 컨테이너는 `ghcr.io/uknowpro/netflow:v0.3.0`(Linux amd64/arm64)을 사용합니다. 소스 빌드: Go 1.26 이상에서 `go build -o bin/netflow ./cmd/netflow`.
+예시 도메인을 검사할 실제 목적지로 바꾸세요. 컨테이너는 `ghcr.io/uknowpro/netflow:v0.3.1`(Linux amd64/arm64)을 사용합니다. 소스 빌드: Go 1.26 이상에서 `go build -o bin/netflow ./cmd/netflow`.
 
 ## AKS·VM에서 여러 경로 검사
 

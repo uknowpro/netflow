@@ -44,7 +44,7 @@ TCP connected successfully; the HTTP response did not match the default 200–29
 
 ## Get started
 
-Download your OS/CPU archive and verify its checksum from [v0.3.0 Releases](https://github.com/uknowpro/netflow/releases/tag/v0.3.0). Extract it and place `netflow` (`netflow.exe` on Windows) on your PATH. [Installation details](docs/SUPPORT.md)
+Download your OS/CPU archive and verify its checksum from [v0.3.1 Releases](https://github.com/uknowpro/netflow/releases/tag/v0.3.1). Extract it and place `netflow` (`netflow.exe` on Windows) on your PATH. [Installation details](docs/SUPPORT.md)
 
 ```bash
 # Database port: confirms TCP connectivity, not DB login.
@@ -57,7 +57,7 @@ netflow probe --protocol https --url https://api.example.com/health
 netflow probe --host db.internal.example --port 5432 --count 20 --output json
 ```
 
-Replace example domains with your authorized destinations. Container: `ghcr.io/uknowpro/netflow:v0.3.0` (Linux amd64/arm64). Build from source with Go 1.26+: `go build -o bin/netflow ./cmd/netflow`.
+Replace example domains with your authorized destinations. Container: `ghcr.io/uknowpro/netflow:v0.3.1` (Linux amd64/arm64). Build from source with Go 1.26+: `go build -o bin/netflow ./cmd/netflow`.
 
 ## Check flows from AKS or a VM
 
